@@ -67,6 +67,24 @@ describe('browsing', () => {
     expect((await list('?trail=nowhere')).items).toHaveLength(0);
   });
 
+  it('is cheap to re-check: ETags, 304s, compression, and CDN-only caching', async () => {
+    const url = `/api/v1/parks/${PARK}/benches?limit=1000`;
+    const first = await t.app.inject({ method: 'GET', url });
+    // Browsers must revalidate (so nobody sees a stale map); a CDN may hold it briefly.
+    expect(first.headers['cache-control']).toContain('max-age=0');
+    expect(first.headers['cache-control']).toContain('s-maxage=15');
+
+    const etag = first.headers.etag as string;
+    expect(etag).toBeTruthy();
+    const again = await t.app.inject({ method: 'GET', url, headers: { 'if-none-match': etag } });
+    expect(again.statusCode).toBe(304);
+    expect(again.body).toBe('');
+
+    // Larger responses (above 1 KB) are compressed; the 3-bench test park is too small, so use the docs.
+    const big = await t.app.inject({ method: 'GET', url: '/api/docs/json', headers: { 'accept-encoding': 'gzip' } });
+    expect(big.headers['content-encoding']).toBe('gzip');
+  });
+
   it('returns 404 for an unknown bench', async () => {
     const res = await t.app.inject({ method: 'GET', url: `/api/v1/parks/${PARK}/benches/NOPE` });
     expect(res.statusCode).toBe(404);

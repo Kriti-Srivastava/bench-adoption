@@ -1,4 +1,6 @@
+import compress from '@fastify/compress';
 import cookie from '@fastify/cookie';
+import etag from '@fastify/etag';
 import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import swagger from '@fastify/swagger';
@@ -7,13 +9,13 @@ import Fastify, { type FastifyError, type FastifyServerOptions } from 'fastify';
 import {
   hasZodFastifySchemaValidationErrors,
   jsonSchemaTransform,
-  serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { sql } from 'drizzle-orm';
 import type { ErrorResponse } from '@bench/shared';
 import { registerSessionAuth } from './auth/session.ts';
+import { fastSerializerCompiler } from './serializer.ts';
 import { AppError } from './errors.ts';
 import { adoptionRoutes } from './routes/adoptions.ts';
 import { authRoutes } from './routes/auth.ts';
@@ -35,12 +37,16 @@ export async function buildApp(
     trustProxy: (_address: string, hop: number) => hop < deps.config.trustProxyHops,
   }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
-  app.setSerializerCompiler(serializerCompiler);
+  app.setSerializerCompiler(fastSerializerCompiler);
 
   const ctx: AppContext = { ...deps, log: app.log };
   const services = createServices(ctx);
 
   await app.register(cookie);
+  // Gzip/brotli: the map's bench list is ~130 KB of JSON and compresses ~10x.
+  await app.register(compress, { threshold: 1024 });
+  // Weak ETags let browsers and CDNs revalidate with a 304 instead of re-downloading.
+  await app.register(etag, { weak: true });
   // In-memory limits are per instance; with REDIS_URL all instances share one count.
   const redis = deps.config.redisUrl
     ? new Redis(deps.config.redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1 })

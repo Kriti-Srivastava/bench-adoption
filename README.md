@@ -171,6 +171,59 @@ at `/api/docs`.
   session cookie stays first-party.
 - **Daily job:** schedule `npm run jobs:daily -w @bench/api` (renewal reminders and clean-up of expired sign-in links and sessions).
 
+## Scaling and performance
+
+Measured on a development laptop: one API process, local Postgres, 20
+concurrent clients.
+
+| Endpoint | Throughput | Median latency | Notes |
+|---|---|---|---|
+| `GET /api/health` (one DB round trip) | ~930 req/s | 20 ms | baseline |
+| `GET /parks/:slug`, `GET …/benches/:code` | ~200 req/s | ~100 ms | |
+| `GET …/benches?limit=1000` (the full map) | ~50 req/s | ~370 ms | ~15 ms of work each |
+
+For the full map, about 13 ms of the ~15 ms is the database query and
+turning 520 rows into objects. Writing the JSON takes under 1 ms (with
+fast-json-stringify). The map response is 139 KB, or 25 KB with gzip.
+
+How it scales:
+
+1. **Public reads are cacheable, and a CDN is the main lever.** Public
+   endpoints send `Cache-Control: max-age=0, must-revalidate, s-maxage=15,
+   stale-while-revalidate=60` and a weak `ETag`. Browsers always revalidate
+   (a cheap `304`), so nobody sees a stale map after adopting. A CDN
+   (Cloudflare, CloudFront, Fastly…) serves the map from its edge and asks
+   the origin only a few times a minute, however many visitors there are.
+2. **The API is stateless.** Run more instances behind a load balancer.
+   Sessions and the per-address sign-in limit live in Postgres. Per-IP limits
+   are shared through Redis when `REDIS_URL` is set. Set `TRUST_PROXY_HOPS`.
+3. **Postgres connections:** each instance opens up to `DB_POOL_MAX`.
+   Beyond a few instances, put PgBouncer or the host's pooler in front.
+4. **Integrity rules hold at any scale** because the database enforces them:
+   no double-booking, same-park links, one renewal per adoption. Contention
+   deadlocks are retried into clean `409`s.
+5. **The data is small.** Hundreds of benches per park and a few thousand
+   adoptions fit comfortably in a single Postgres. Indexes cover every
+   foreign key and hot filter. Read replicas are the next step only if many
+   parks are added.
+
+Recommended next steps, in order of value:
+
+- **Put a CDN in front** of both the web app (static files) and `/api`.
+  This is the biggest gain, and needs configuration rather than code.
+- **Build for production** instead of running TypeScript through `tsx`:
+  bundle the API to JavaScript (esbuild) and ship it in a small container
+  image. This gives faster cold starts, less memory, and no compiler at runtime.
+- **Send emails from a queue (an "outbox").** Today confirmation emails go
+  out inside the request, and a failure is only logged. Writing them to an
+  `outbox` table and sending from a worker makes delivery retryable and
+  keeps the mail server's latency out of requests.
+- **Add monitoring:** request metrics (latency and error rate per route),
+  database pool saturation, and alerts on the daily job.
+- **Trim the map query** if it ever matters. Replacing the per-bench trail
+  and renewal subqueries with pre-aggregated joins would roughly halve its
+  ~13 ms.
+
 ## Sample content
 
 `apps/api/src/scripts/seed-data.ts` holds the park's areas, trails and facts.
