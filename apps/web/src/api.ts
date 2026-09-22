@@ -88,8 +88,8 @@ export const api = {
   /** The signed-in user, or null when signed out. */
   me: () => request<{ user: Me | null }>('/session').then((s) => s.user),
   updateMe: (fullName: string) => request<Me>('/me', { method: 'PATCH', body: { fullName } }),
-  requestMagicLink: (email: string, redirectTo?: string) =>
-    request<void>('/auth/magic-link', { method: 'POST', body: { email, redirectTo } }),
+  requestMagicLink: (email: string, redirectTo?: string, audience: 'donor' | 'staff' = 'donor') =>
+    request<void>('/auth/magic-link', { method: 'POST', body: { email, redirectTo, audience } }),
   verifyMagicLink: (token: string) =>
     request<{ user: Me; redirectTo: string | null }>('/auth/verify', { method: 'POST', body: { token } }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),

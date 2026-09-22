@@ -12,6 +12,8 @@ import {
   benchRetiredKeptEmail,
   magicLinkEmail,
   renewalReminderEmail,
+  staffAccessRefusedEmail,
+  staffLinkEmail,
 } from '../email/templates.ts';
 import type { DomainEvent } from './events.ts';
 
@@ -61,6 +63,13 @@ export function notificationsFor(event: DomainEvent, config: Config): EmailMessa
       return [];
 
     case 'signin.requested':
-      return [magicLinkEmail(event.payload.email, event.payload)];
+      return [
+        event.payload.audience === 'staff'
+          ? staffLinkEmail(event.payload.email, event.payload)
+          : magicLinkEmail(event.payload.email, event.payload),
+      ];
+
+    case 'signin.refused':
+      return [staffAccessRefusedEmail(event.payload.email, { manageUrl })];
   }
 }

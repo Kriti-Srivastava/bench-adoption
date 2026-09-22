@@ -7,9 +7,17 @@ import { ErrorNotice } from './ui.tsx';
  * Passwordless sign in: we email a one-time link that brings the person back
  * to `redirectTo`. First-time adopters get an account automatically.
  */
-export function SignInForm({ redirectTo, intro }: { redirectTo: string; intro?: string }) {
+export function SignInForm({
+  redirectTo,
+  intro,
+  audience = 'donor',
+}: {
+  redirectTo: string;
+  intro?: string;
+  audience?: 'donor' | 'staff';
+}) {
   const [email, setEmail] = useState('');
-  const send = useMutation({ mutationFn: () => api.requestMagicLink(email, redirectTo) });
+  const send = useMutation({ mutationFn: () => api.requestMagicLink(email, redirectTo, audience) });
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -20,7 +28,7 @@ export function SignInForm({ redirectTo, intro }: { redirectTo: string; intro?: 
     return (
       <div className="notice success" role="status">
         <strong>Check your email.</strong> We sent a sign-in link to {email}. It works once and
-        expires in 15 minutes.{' '}
+        expires in {audience === 'staff' ? '5' : '15'} minutes.{' '}
         <button className="link-btn" onClick={() => send.reset()}>
           Use a different email
         </button>

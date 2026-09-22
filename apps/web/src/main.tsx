@@ -13,6 +13,7 @@ import { HomePage } from './pages/HomePage.tsx';
 import { MyBenchesPage } from './pages/MyBenchesPage.tsx';
 import { NotFoundPage } from './pages/NotFoundPage.tsx';
 import { SignInPage } from './pages/SignInPage.tsx';
+import { StaffSignInPage } from './pages/StaffSignInPage.tsx';
 import { VerifyPage } from './pages/VerifyPage.tsx';
 import './styles.css';
 
@@ -45,6 +46,8 @@ const router = createBrowserRouter([
       // The admin area used to be called "staff"; keep old links working.
       { path: '/parks/:slug/staff', element: <RedirectToAdmin /> },
       { path: '/sign-in', element: <SignInPage /> },
+      // The park staff entrance, kept separate from the donor sign-in.
+      { path: '/staff', element: <StaffSignInPage /> },
       { path: '/auth/verify', element: <VerifyPage /> },
       { path: '/me', element: <MyBenchesPage /> },
       // Emails link here (e.g. renewal reminders).

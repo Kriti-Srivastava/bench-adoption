@@ -9,7 +9,7 @@ import {
 } from '@bench/shared';
 import type { Executor } from '../db/client.ts';
 import { toCsv } from '../http/csv.ts';
-import { badRequest, conflict, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import type { BenchRow } from '../repositories/benches.ts';
 import * as taskRepo from '../repositories/maintenance.ts';
@@ -46,6 +46,19 @@ export function createAdoptionService(ctx: AppContext) {
     return todayIn(park.timezone, ctx.clock.now());
   }
 
+  /**
+   * Staff accounts are for looking after the park, not for donating: keeping
+   * them separate keeps the record of who adopted what honest. Staff who want
+   * to adopt use a personal email address.
+   */
+  function requireDonor(user: UserRow) {
+    if (user.role !== 'adopter') {
+      throw forbidden(
+        'This is a park-staff account. To adopt or renew a bench, sign in with a personal email address.',
+      );
+    }
+  }
+
   const view = async (tx: Executor, id: string) =>
     toAdoption((await adoptionRepo.findAdoptionView(tx, id))!, ctx.clock.now());
 
@@ -70,6 +83,7 @@ export function createAdoptionService(ctx: AppContext) {
   return {
     /** Adopts a bench starting today, and queues its plaque (typically fitted within 6-8 weeks). */
     async adopt(user: UserRow, input: AdoptInput): Promise<Adoption> {
+      requireDonor(user);
       const adoption = await withBenchesLocked(db, [input.benchId], async (tx, [bench]) => {
         const today = await requireAdoptable(tx, bench!, input.months);
         const row = await adoptionRepo.insertAdoption(tx, {
@@ -97,6 +111,7 @@ export function createAdoptionService(ctx: AppContext) {
 
     /** Extends the owner's adoption; the new period starts when the current one ends. */
     async renew(user: UserRow, adoptionId: string, months: number): Promise<Adoption> {
+      requireDonor(user);
       const adoption = await withAdoptionLocked(db, adoptionId, async (tx, current, bench) => {
         // Someone else's adoption is reported as missing, not forbidden, to avoid leaking ids.
         if (current.adoption.adopterId !== user.id) throw notFound('Adoption');

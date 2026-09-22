@@ -182,13 +182,14 @@ describe('adopting', () => {
 
   it('refuses retired benches', async () => {
     const staff = await signIn(t, 'staff@example.org', 'staff');
+    const donor = await signIn(t, 'donor@example.org');
     await t.app.inject({
       method: 'POST',
       url: `/api/v1/benches/${benches[2].id}/retire`,
       headers: { cookie: staff.cookie },
       payload: { adoption: 'keep' },
     });
-    const res = await adopt(staff.cookie, benches[2].id);
+    const res = await adopt(donor.cookie, benches[2].id);
     expect(res.json().error.code).toBe('bench_retired');
     // Retired benches stay on the map, marked as such.
     expect((await getBench('T-003')).availability).toBe('retired');

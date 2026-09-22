@@ -28,10 +28,28 @@ export function createAuthService(ctx: AppContext) {
      * Emails a single-use sign-in link. Behaves identically whether or not an
      * account exists; the account is created when the link is first used.
      */
-    async requestMagicLink(email: string, redirectTo: string | null): Promise<void> {
+    /**
+     * Emails a sign-in link. The staff entrance issues short-lived links and
+     * only to accounts that actually have park-staff access; anyone else is
+     * told so by email, which avoids revealing who does have access.
+     */
+    async requestMagicLink(
+      email: string,
+      redirectTo: string | null,
+      audience: 'donor' | 'staff' = 'donor',
+    ): Promise<void> {
       const token = newToken();
       const now = ctx.clock.now();
       const limits = config.magicLinkPerEmail;
+      const ttlMinutes = audience === 'staff' ? config.staffMagicLinkTtlMinutes : config.magicLinkTtlMinutes;
+
+      if (audience === 'staff') {
+        const user = await userRepo.findUserByEmail(db, email);
+        if (!user || user.role === 'adopter') {
+          await db.transaction((tx) => recordEvent(tx, ctx, { type: 'signin.refused', payload: { email } }));
+          return;
+        }
+      }
       await db.transaction(async (tx) => {
         await userRepo.lockEmail(tx, email);
         const recent = await userRepo.recentAuthTokens(tx, email, new Date(now.getTime() - 60 * MINUTE));
@@ -45,7 +63,8 @@ export function createAuthService(ctx: AppContext) {
           tokenHash: hashToken(token),
           email,
           redirectTo,
-          expiresAt: new Date(now.getTime() + config.magicLinkTtlMinutes * MINUTE),
+          audience,
+          expiresAt: new Date(now.getTime() + ttlMinutes * MINUTE),
           createdAt: now,
         });
         // Queued with the token, so a mail outage delays the link rather than
@@ -55,7 +74,8 @@ export function createAuthService(ctx: AppContext) {
           payload: {
             email,
             link: `${config.webUrl}/auth/verify?token=${encodeURIComponent(token)}`,
-            ttlMinutes: config.magicLinkTtlMinutes,
+            ttlMinutes,
+            audience,
           },
         });
       });
@@ -69,6 +89,10 @@ export function createAuthService(ctx: AppContext) {
         throw new AppError(400, 'invalid_link', 'This sign-in link is invalid or has expired.');
       }
       const user = await userRepo.findOrCreateUser(db, used.email);
+      // Access could have been revoked between issuing the link and using it.
+      if (used.audience === 'staff' && user.role === 'adopter') {
+        throw new AppError(403, 'no_staff_access', 'This account does not have park-staff access.');
+      }
       const sessionToken = newToken();
       const sessionExpiresAt = new Date(now.getTime() + config.sessionTtlDays * DAY);
       await userRepo.insertSession(db, {

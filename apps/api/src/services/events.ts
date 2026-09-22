@@ -51,7 +51,12 @@ export type DomainEvent =
       };
     }
   | { type: 'bench.restored'; payload: { code: string } }
-  | { type: 'signin.requested'; payload: { email: string; link: string; ttlMinutes: number } };
+  | {
+      type: 'signin.requested';
+      payload: { email: string; link: string; ttlMinutes: number; audience: 'donor' | 'staff' };
+    }
+  /** Someone asked for a staff link with an address that has no staff access. */
+  | { type: 'signin.refused'; payload: { email: string } };
 
 export type EventOf<T extends EventType> = Extract<DomainEvent, { type: T }>;
 

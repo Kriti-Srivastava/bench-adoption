@@ -26,6 +26,11 @@ donors use and the tools the park's crew use to look after the benches.
 
 **For park staff**
 
+- **A separate entrance**: staff sign in through the "Park staff" link in the
+  footer, not the donor sign-in. Staff links last 5 minutes instead of 15, and
+  only reach accounts that actually have staff access. Staff accounts look
+  after benches; they cannot adopt or renew one. Anyone who wants a bench of
+  their own adopts it with a personal address, like any other donor.
 - **Dashboard**: urgent jobs, benches due their yearly inspection, plaques to
   install, adoptions ending soon.
 - **Maintenance**: inspections, repairs, painting, cleaning, graffiti, plaque

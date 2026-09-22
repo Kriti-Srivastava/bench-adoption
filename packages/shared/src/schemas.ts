@@ -170,9 +170,18 @@ export const redirectPath = z
   .string()
   .regex(/^\/(?!\/)[^\s]*$/, 'Must be a path within this site');
 
+/**
+ * Which entrance a sign-in link is for. Staff links are short-lived and only
+ * work for accounts with park-staff access; donor links are for everyone.
+ */
+export const signInAudiences = ['donor', 'staff'] as const;
+export const signInAudience = z.enum(signInAudiences);
+export type SignInAudience = z.infer<typeof signInAudience>;
+
 export const requestMagicLinkInput = z.object({
   email,
   redirectTo: redirectPath.optional(),
+  audience: signInAudience.default('donor'),
 });
 
 export const verifyMagicLinkInput = z.object({ token: z.string().min(1) });
@@ -265,6 +274,7 @@ export const eventTypes = [
   'bench.retired',
   'bench.restored',
   'signin.requested',
+  'signin.refused',
 ] as const;
 export const eventType = z.enum(eventTypes);
 export type EventType = z.infer<typeof eventType>;

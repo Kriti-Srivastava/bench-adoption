@@ -40,7 +40,7 @@ export function Layout() {
             <NavLink to={parkPath} className={() => (onMap ? 'active' : '')}>
               Map
             </NavLink>
-            {user && <NavLink to="/me">My account</NavLink>}
+            {user && !isStaff && <NavLink to="/me">My account</NavLink>}
             {isStaff && <NavLink to={`${parkPath}/admin`}>Admin</NavLink>}
             {user ? (
               <button className="link-btn" onClick={() => logout.mutate()}>
@@ -63,7 +63,11 @@ export function Layout() {
           <nav className="row small" aria-label="Footer">
             <Link to="/">Home</Link>
             <Link to={parkPath}>Bench map</Link>
-            <Link to="/me">My account</Link>
+            {!isStaff && <Link to="/me">My account</Link>}
+            {/* The staff entrance: findable, but out of the donors' way. */}
+            <Link to="/staff" className="muted">
+              Park staff
+            </Link>
           </nav>
         </div>
       </footer>

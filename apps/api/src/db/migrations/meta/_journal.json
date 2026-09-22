@@ -64,6 +64,20 @@
       "when": 1790100484992,
       "tag": "0008_events_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790120775253,
+      "tag": "0009_staff_sign_in",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790121272626,
+      "tag": "0010_staff_sign_in",
+      "breakpoints": true
     }
   ]
 }

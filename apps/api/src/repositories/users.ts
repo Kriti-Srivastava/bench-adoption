@@ -12,6 +12,11 @@ export async function findOrCreateUser(db: Executor, email: string): Promise<Use
   return row!;
 }
 
+export async function findUserByEmail(db: Executor, email: string): Promise<UserRow | undefined> {
+  const [row] = await db.select().from(users).where(eq(users.email, email));
+  return row;
+}
+
 export async function findUserById(db: Executor, id: string): Promise<UserRow | undefined> {
   const [row] = await db.select().from(users).where(eq(users.id, id));
   return row;
@@ -70,7 +75,14 @@ export async function updateUser(
 
 export async function insertAuthToken(
   db: Executor,
-  values: { tokenHash: string; email: string; redirectTo: string | null; expiresAt: Date; createdAt: Date },
+  values: {
+    tokenHash: string;
+    email: string;
+    redirectTo: string | null;
+    audience: 'donor' | 'staff';
+    expiresAt: Date;
+    createdAt: Date;
+  },
 ): Promise<void> {
   await db.insert(authTokens).values(values);
 }

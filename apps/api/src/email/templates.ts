@@ -115,3 +115,25 @@ export const benchRetiredKeptEmail: Template<{
     `We'd be glad to help you choose another bench nearer the time:\n${d.manageUrl}` +
     signature,
 });
+
+export const staffLinkEmail: Template<{ link: string; ttlMinutes: number }> = (to, d) => ({
+  to,
+  subject: 'Your park staff sign-in link',
+  text:
+    `Use the link below to open the park staff area:\n\n${d.link}\n\n` +
+    `For security, staff links work once and expire in ${d.ttlMinutes} minutes. ` +
+    `If you didn't request it, please tell an administrator: someone may be trying ` +
+    `to reach the staff tools with your address.`,
+});
+
+export const staffAccessRefusedEmail: Template<{ manageUrl: string }> = (to, d) => ({
+  to,
+  subject: 'No park staff access for this address',
+  text:
+    `Someone asked for a park staff sign-in link for this email address, but it ` +
+    `does not have staff access.\n\n` +
+    `If you are park staff, ask an administrator to grant your address access. ` +
+    `If you are a donor looking after your own bench, sign in from the main site ` +
+    `instead:\n${d.manageUrl}` +
+    signature,
+});

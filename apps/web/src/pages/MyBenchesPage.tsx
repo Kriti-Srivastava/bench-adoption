@@ -8,10 +8,12 @@ import { StatusPill } from '../components/TaskEditor.tsx';
 import { ErrorNotice, Loadable, TermPicker } from '../components/ui.tsx';
 import { daysLeftLabel, formatDate, formatPeriod } from '../format.ts';
 import { TYPE_LABEL } from '../maintenance.ts';
-import { keys, useMe, useMyAdoptions, usePark } from '../queries.ts';
+import { DEFAULT_PARK } from '../format.ts';
+import { keys, useIsStaff, useMe, useMyAdoptions, usePark } from '../queries.ts';
 
 export function MyBenchesPage() {
   const me = useMe();
+  const { isStaff } = useIsStaff();
   const [params] = useSearchParams();
   const renewId = params.get('renew');
   const adoptions = useMyAdoptions(Boolean(me.data));
@@ -19,6 +21,13 @@ export function MyBenchesPage() {
   return (
     <div className="stack">
       <h1>My account</h1>
+      {isStaff && (
+        <p className="notice">
+          This is a park-staff account, which looks after benches rather than adopting them. The{' '}
+          <Link to={`/parks/${DEFAULT_PARK}/admin`}>Admin area</Link> has your tools. To adopt a
+          bench yourself, sign in with a personal email address.
+        </p>
+      )}
       <Loadable query={me}>
         {(user) =>
           user ? (

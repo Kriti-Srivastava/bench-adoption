@@ -30,7 +30,7 @@ export const authRoutes =
         config: { rateLimit: { max: config.authRateLimitPerMinute, timeWindow: '1 minute' } },
       },
       async (req, reply) => {
-        await services.auth.requestMagicLink(req.body.email, req.body.redirectTo ?? null);
+        await services.auth.requestMagicLink(req.body.email, req.body.redirectTo ?? null, req.body.audience);
         return reply.code(204).send();
       },
     );

@@ -62,6 +62,8 @@ export interface Config {
   trustProxyHops: number;
   dbPoolMax: number;
   magicLinkTtlMinutes: number;
+  /** Park-staff links are shorter-lived than donors'. */
+  staffMagicLinkTtlMinutes: number;
   sessionTtlDays: number;
   /** Days before an adoption ends that a renewal reminder is emailed. */
   reminderDaysBefore: readonly number[];
@@ -119,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxyHops: e.TRUST_PROXY_HOPS,
     dbPoolMax: e.DB_POOL_MAX,
     magicLinkTtlMinutes: 15,
+    staffMagicLinkTtlMinutes: 5,
     sessionTtlDays: 30,
     reminderDaysBefore: [60, 30, 7],
   };

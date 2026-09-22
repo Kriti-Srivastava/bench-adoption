@@ -10,7 +10,13 @@
  * an active adoption covers today, so it can't drift out of sync.
  */
 import { sql } from 'drizzle-orm';
-import { eventTypes, maintenancePriorities, maintenanceStatuses, maintenanceTypes } from '@bench/shared';
+import {
+  eventTypes,
+  maintenancePriorities,
+  maintenanceStatuses,
+  maintenanceTypes,
+  signInAudiences,
+} from '@bench/shared';
 import {
   boolean,
   check,
@@ -37,6 +43,7 @@ export const benchStatusEnum = pgEnum('bench_status', ['active', 'retired']);
 export const adoptionStatusEnum = pgEnum('adoption_status', ['active', 'cancelled']);
 export const eventTypeEnum = pgEnum('event_type', eventTypes);
 export const outboxStatusEnum = pgEnum('outbox_status', ['pending', 'sent', 'failed']);
+export const signInAudienceEnum = pgEnum('sign_in_audience', signInAudiences);
 export const maintenanceTypeEnum = pgEnum('maintenance_type', maintenanceTypes);
 export const maintenanceStatusEnum = pgEnum('maintenance_status', maintenanceStatuses);
 export const maintenancePriorityEnum = pgEnum('maintenance_priority', maintenancePriorities);
@@ -227,6 +234,8 @@ export const authTokens = pgTable(
     tokenHash: text('token_hash').notNull().unique(),
     email: text('email').notNull(),
     redirectTo: text('redirect_to'),
+    /** Which entrance issued it: park staff links are short-lived. */
+    audience: signInAudienceEnum('audience').notNull().default('donor'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     usedAt: timestamp('used_at', { withTimezone: true }),
     createdAt: createdAt(),
