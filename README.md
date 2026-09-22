@@ -224,6 +224,30 @@ Recommended next steps, in order of value:
   and renewal subqueries with pre-aggregated joins would roughly halve its
   ~13 ms.
 
+## Chaos testing
+
+`npm run test:chaos -w @bench/api` runs a separate, deliberately destructive
+suite in the spirit of Netflix's Chaos Monkey. It breaks things while the
+system is busy, then checks that every request got an answer, that the
+data rules still hold, and that the system recovers.
+
+- **Monkeys** (`apps/api/chaos/monkey.ts`): one kills random Postgres
+  connections mid-request, one makes the mail provider fail and stall, and
+  the tests also leap the clock forward and send crowds of simultaneous
+  requests at one bench.
+- **Workload** (`chaos/workload.ts`): random mixes of adopt, renew, cancel,
+  retire (keep, end or relocate), restore, report and close-task, fired in
+  concurrent waves through the real HTTP API.
+- **Invariants** (`chaos/invariants.ts`): SQL checks for rules that must
+  always hold. Examples: no overlapping adoptions, renewals continue their
+  predecessor, nothing adopted after retirement, and no plaque work left for
+  cancelled adoptions.
+- **Reproducible:** each run prints its seed. `CHAOS_SEED=<seed>` replays it
+  exactly.
+
+Some scenarios fail by design until the race-condition fixes in the bug
+list land. The suite exists to prove those fixes.
+
 ## Sample content
 
 `apps/api/src/scripts/seed-data.ts` holds the park's areas, trails and facts.
