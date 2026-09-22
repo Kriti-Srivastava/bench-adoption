@@ -9,7 +9,9 @@ import { z } from 'zod';
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().default('postgres://bench:bench@localhost:5442/bench'),
-  WEB_URL: z.string().default('http://localhost:5173'),
+  // Validated as a URL: a typo (or a stray newline from pasting into a
+  // dashboard) would otherwise end up inside every emailed link.
+  WEB_URL: z.url().default('http://localhost:5173'),
   PORT: z.coerce.number().int().default(3000),
   /** 'smtp' for a mail server (or Mailpit in development), 'resend' for Resend's API. */
   MAIL_PROVIDER: z.enum(['smtp', 'resend']).default('smtp'),
@@ -65,11 +67,24 @@ export interface Config {
   reminderDaysBefore: readonly number[];
 }
 
+/**
+ * Trims every value and drops empty ones, so a stray space or newline copied
+ * into a hosting dashboard can't reach the rest of the system, and a blank
+ * value falls back to its default instead of overriding it.
+ */
+function clean(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env)
+      .map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])
+      .filter(([, value]) => value !== ''),
+  );
+}
+
 /** Settings that have development defaults but must be chosen explicitly in production. */
 const REQUIRED_IN_PRODUCTION = ['DATABASE_URL', 'WEB_URL', 'MAIL_FROM'] as const;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const e = envSchema.parse(env);
+  const e = envSchema.parse(clean(env));
   const production = e.NODE_ENV === 'production';
   const cookieSecure = e.COOKIE_SECURE ?? production;
 

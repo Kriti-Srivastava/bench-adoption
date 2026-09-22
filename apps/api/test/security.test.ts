@@ -107,6 +107,15 @@ describe('configuration', () => {
     expect(loadConfig({}).cookieSecure).toBe(false); // development
   });
 
+  it('cleans values pasted with stray whitespace, and rejects a malformed URL', () => {
+    // A trailing newline here used to end up in the middle of every emailed link.
+    const config = loadConfig({ ...production, WEB_URL: 'https://benches.example.org\n', MAIL_FROM: ' Benches <b@x.org> ' });
+    expect(config.webUrl).toBe('https://benches.example.org');
+    expect(config.mail.from).toBe('Benches <b@x.org>');
+
+    expect(() => loadConfig({ ...production, WEB_URL: 'benches.example.org' })).toThrow();
+  });
+
   it('refuses to start production with unsafe or missing settings, listing every problem', () => {
     expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(ConfigError);
     try {
