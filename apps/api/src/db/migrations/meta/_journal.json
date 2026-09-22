@@ -57,6 +57,13 @@
       "when": 1790097124467,
       "tag": "0007_adoption_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790100484992,
+      "tag": "0008_events_outbox",
+      "breakpoints": true
     }
   ]
 }

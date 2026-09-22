@@ -17,6 +17,9 @@ type Method = 'GET' | 'POST' | 'PATCH' | 'PUT';
 const call = (method: Method, url: string, cookie: string, payload?: object) =>
   t.app.inject({ method, url: `/api/v1${url}`, headers: { cookie }, payload });
 
+/** Runs the worker so queued emails land in the test mailbox. */
+const deliver = () => t.services.outbox.dispatch(100);
+
 const adopt = (cookie: string, benchId: string, extra: object = {}) =>
   call('POST', '/adoptions', cookie, { benchId, months: 12, displayName: 'The Smiths', ...extra }).then((r) =>
     r.json(),
@@ -48,6 +51,7 @@ describe('retiring a bench', () => {
     const donor = await signIn(t, 'donor@example.org');
     const staff = await signIn(t, 'staff@example.org', 'staff');
     const adoption = await adopt(donor.cookie, benches[0].id);
+    await deliver(); // flush the adoption confirmation, so the mailbox shows only what follows
     t.mailer.sent.length = 0;
     return { donor, staff, adoption };
   }
@@ -56,7 +60,11 @@ describe('retiring a bench', () => {
     const { staff } = await adoptedBench();
     const res = await call('POST', `/benches/${benches[0].id}/retire`, staff.cookie, { adoption: 'keep' });
     expect(res.json()).toMatchObject({ availability: 'retired', currentAdoption: { displayName: 'The Smiths' } });
-    expect(t.mailer.sent).toHaveLength(0);
+    // The donor keeps their dedication but can't renew, so they are told now.
+    await deliver();
+    expect(t.mailer.sent).toMatchObject([
+      { to: 'donor@example.org', subject: 'Bench T-001 is leaving the park' },
+    ]);
 
     const history = await tasksFor(staff.cookie, benches[0].id);
     expect(history[0]).toMatchObject({ title: 'Bench retired', status: 'done' });
@@ -70,7 +78,11 @@ describe('retiring a bench', () => {
       reason: 'storm damage',
     });
     expect(res.json()).toMatchObject({ availability: 'retired', currentAdoption: null });
-    expect(t.mailer.sent[0]).toMatchObject({ to: 'donor@example.org', subject: 'Bench T-001 has been retired' });
+    await deliver();
+    expect(t.mailer.sent[0]).toMatchObject({
+      to: 'donor@example.org',
+      subject: 'Your adoption of bench T-001 has ended',
+    });
     expect(t.mailer.sent[0]!.text).toContain('storm damage');
   });
 
@@ -86,6 +98,7 @@ describe('retiring a bench', () => {
     expect(target.currentAdoption).toMatchObject({ displayName: 'The Smiths', endDate: '2027-09-21' });
     const [move] = await tasksFor(staff.cookie, benches[2].id);
     expect(move).toMatchObject({ type: 'relocation', status: 'open', title: 'Move plaque from T-001' });
+    await deliver();
     expect(t.mailer.sent[0]!.subject).toBe('Your adoption has moved to bench T-003');
 
     const mine = (await call('GET', '/me/adoptions', donor.cookie)).json().items;

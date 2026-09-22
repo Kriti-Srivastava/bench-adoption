@@ -250,6 +250,25 @@ export const adminAdoptionList = z.object({ items: z.array(adminAdoption) });
 
 export const setRoleInput = z.object({ email, role });
 
+// ---------------------------------------------------------------- events
+
+/**
+ * Everything worth remembering that happens to an adoption or a bench.
+ * Events are the audit history, and they decide who gets told what.
+ */
+export const eventTypes = [
+  'adoption.created',
+  'adoption.renewed',
+  'adoption.cancelled',
+  'adoption.moved',
+  'adoption.ending_soon',
+  'bench.retired',
+  'bench.restored',
+  'signin.requested',
+] as const;
+export const eventType = z.enum(eventTypes);
+export type EventType = z.infer<typeof eventType>;
+
 // ---------------------------------------------------------------- maintenance
 
 /** Kinds of upkeep work, modelled on how park conservancies care for benches. */

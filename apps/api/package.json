@@ -11,6 +11,7 @@
     "db:seed": "tsx --env-file-if-exists=../../.env src/scripts/seed.ts",
     "make-admin": "tsx --env-file-if-exists=../../.env src/scripts/make-admin.ts",
     "import-benches": "tsx --env-file-if-exists=../../.env src/scripts/import-benches.ts",
+    "worker": "tsx --env-file-if-exists=../../.env src/scripts/worker.ts",
     "jobs:daily": "tsx --env-file-if-exists=../../.env src/scripts/daily.ts",
     "test": "vitest run",
     "test:chaos": "vitest run -c vitest.chaos.config.ts",

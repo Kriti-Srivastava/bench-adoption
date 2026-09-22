@@ -33,7 +33,9 @@ export async function createTestApp(overrides: Partial<Config> = {}) {
     databaseUrl: TEST_DATABASE_URL,
     ...overrides,
   };
-  const { db, close } = createDb(TEST_DATABASE_URL);
+  // The chaos suite kills connections on purpose; the resulting "terminated"
+  // errors are the scenario working, not a failure, so they are not logged.
+  const { db, close } = createDb(TEST_DATABASE_URL, { onError: () => {} });
   const mailer = createMemoryMailer();
   const clock = createTestClock('2026-09-21T16:00:00Z');
   const { app, services, routePolicies } = await buildApp({ db, config, clock, mailer });
@@ -50,7 +52,7 @@ export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
  */
 export async function resetData({ db, mailer }: TestApp) {
   await db.execute(sql`
-    truncate maintenance_tasks, reminders_sent, adoptions, sessions, auth_tokens, users,
+    truncate outbox, events, maintenance_tasks, reminders_sent, adoptions, sessions, auth_tokens, users,
              bench_trails, benches, trails, areas, parks
     restart identity cascade
   `);
@@ -105,6 +107,7 @@ export async function resetData({ db, mailer }: TestApp) {
 /** Signs in through the real magic-link flow and returns the session cookie. */
 export async function signIn(t: TestApp, email: string, role?: 'staff' | 'admin') {
   await t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload: { email } });
+  await t.services.outbox.dispatch(100); // stand in for the worker
   const message = t.mailer.sent.findLast((m) => m.to === email);
   const token = new URL(message!.text.match(/https?:\/\/\S+/)![0]).searchParams.get('token');
   const res = await t.app.inject({

@@ -10,7 +10,7 @@
  * an active adoption covers today, so it can't drift out of sync.
  */
 import { sql } from 'drizzle-orm';
-import { maintenancePriorities, maintenanceStatuses, maintenanceTypes } from '@bench/shared';
+import { eventTypes, maintenancePriorities, maintenanceStatuses, maintenanceTypes } from '@bench/shared';
 import {
   boolean,
   check,
@@ -35,6 +35,8 @@ import {
 export const roleEnum = pgEnum('role', ['adopter', 'staff', 'admin']);
 export const benchStatusEnum = pgEnum('bench_status', ['active', 'retired']);
 export const adoptionStatusEnum = pgEnum('adoption_status', ['active', 'cancelled']);
+export const eventTypeEnum = pgEnum('event_type', eventTypes);
+export const outboxStatusEnum = pgEnum('outbox_status', ['pending', 'sent', 'failed']);
 export const maintenanceTypeEnum = pgEnum('maintenance_type', maintenanceTypes);
 export const maintenanceStatusEnum = pgEnum('maintenance_status', maintenanceStatuses);
 export const maintenancePriorityEnum = pgEnum('maintenance_priority', maintenancePriorities);
@@ -301,5 +303,54 @@ export const maintenanceTasks = pgTable(
       'maintenance_completed_when_done',
       sql`(${t.status} = 'done') = (${t.completedAt} is not null)`,
     ),
+  ],
+);
+
+/**
+ * Append-only history of what happened. Written in the same transaction as
+ * the change it describes, so the record and the change can never disagree.
+ */
+export const events = pgTable(
+  'events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    type: eventTypeEnum('type').notNull(),
+    benchId: uuid('bench_id').references(() => benches.id),
+    adoptionId: uuid('adoption_id').references(() => adoptions.id),
+    /** Who caused it (staff member or donor); absent for scheduled jobs. */
+    actorId: uuid('actor_id').references(() => users.id),
+    /** Everything needed to render notifications, captured when it happened. */
+    payload: jsonb('payload').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('events_bench_idx').on(t.benchId), index('events_adoption_idx').on(t.adoptionId)],
+);
+
+/**
+ * Emails waiting to be sent, written with their event in one transaction
+ * (the "transactional outbox"): a confirmation can't be lost because mail
+ * was down, and can't be sent for a change that was rolled back. A worker
+ * sends them and retries with backoff.
+ */
+export const outbox = pgTable(
+  'outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    recipient: text('recipient').notNull(),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    status: outboxStatusEnum('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    lastError: text('last_error'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('outbox_due_idx').on(t.status, t.nextAttemptAt),
+    check('outbox_sent_when_sent', sql`(${t.status} = 'sent') = (${t.sentAt} is not null)`),
   ],
 );

@@ -4,6 +4,7 @@ import { createAuthService } from './auth.ts';
 import { createBenchService } from './benches.ts';
 import type { AppContext } from './context.ts';
 import { createMaintenanceService } from './maintenance.ts';
+import { createOutboxService } from './outbox.ts';
 import { createReminderService } from './reminders.ts';
 
 export function createServices(ctx: AppContext) {
@@ -14,6 +15,7 @@ export function createServices(ctx: AppContext) {
     reminders: createReminderService(ctx),
     maintenance: createMaintenanceService(ctx),
     admin: createAdminService(ctx),
+    outbox: createOutboxService(ctx),
   };
 }
 

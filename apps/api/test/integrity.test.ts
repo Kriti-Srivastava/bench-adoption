@@ -167,7 +167,7 @@ describe('daily job', () => {
       payload: { benchId: data.benches[0].id, months: 1, displayName: 'Donor' },
     });
     await benchRepo.updateBench(t.db, data.benches[0].id, { status: 'retired' });
-    expect(await t.services.reminders.sendDueReminders()).toBe(0);
+    expect(await t.services.reminders.enqueueDueReminders()).toBe(0);
   });
 
   it('removes day-old sign-in links and expired sessions, keeping recent ones', async () => {

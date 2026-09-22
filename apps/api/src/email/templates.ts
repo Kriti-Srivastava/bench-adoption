@@ -78,18 +78,40 @@ export const adoptionMovedEmail: Template<{
     signature,
 });
 
+/** A cancellation: by staff, or because the bench was retired (then `reason` explains). */
 export const adoptionEndedEmail: Template<{
   benchCode: string;
   reason: string | null;
   manageUrl: string;
 }> = (to, d) => ({
   to,
-  subject: `Bench ${d.benchCode} has been retired`,
+  subject: `Your adoption of bench ${d.benchCode} has ended`,
   text:
-    `Bench ${d.benchCode} has been removed from the park` +
+    (d.reason
+      ? `Bench ${d.benchCode} has been removed from the park (${d.reason}), so your adoption of it has ended early.`
+      : `Your adoption of bench ${d.benchCode} has been ended by the park team.`) +
+    `
+
+We're sorry for the change. If you'd like to adopt another bench, ` +
+    `just reply to this email and we'll help you choose one, or browse the map:
+${d.manageUrl}` +
+    signature,
+});
+
+export const benchRetiredKeptEmail: Template<{
+  benchCode: string;
+  endDate: string;
+  reason: string | null;
+  manageUrl: string;
+}> = (to, d) => ({
+  to,
+  subject: `Bench ${d.benchCode} is leaving the park`,
+  text:
+    `Bench ${d.benchCode} is being retired from the adoption program` +
     (d.reason ? ` (${d.reason})` : '') +
-    `, so your adoption of it has ended early.\n\n` +
-    `We're sorry for the change. If you'd like to adopt another bench, ` +
-    `just reply to this email and we'll help you choose one, or browse the map:\n${d.manageUrl}` +
+    `.\n\n` +
+    `Your dedication stays on it until ${longDate(d.endDate)}, as agreed. ` +
+    `After that the bench will be removed, so this adoption can't be renewed. ` +
+    `We'd be glad to help you choose another bench nearer the time:\n${d.manageUrl}` +
     signature,
 });

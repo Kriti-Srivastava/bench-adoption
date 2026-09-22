@@ -16,7 +16,6 @@ import {
   type RetireBenchInput,
   type Role,
 } from '@bench/shared';
-import { adoptionEndedEmail, adoptionMovedEmail } from '../email/templates.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as benchRepo from '../repositories/benches.ts';
@@ -25,9 +24,9 @@ import * as parkRepo from '../repositories/parks.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
 import { withBenchesLocked } from './consistency.ts';
+import { recordEvent } from './events.ts';
 import type { AppContext } from './context.ts';
 import { toBenchSummary } from './mappers.ts';
-import { notify } from './notify.ts';
 
 /** An active bench is due an inspection if it has never had one, or not within the interval. */
 export function needsInspection(row: benchRepo.AdminBenchRow, today: IsoDate): boolean {
@@ -46,8 +45,7 @@ function toAdminBench(row: benchRepo.AdminBenchRow, today: IsoDate): AdminBench 
 }
 
 export function createAdminService(ctx: AppContext) {
-  const { db, config } = ctx;
-  const manageUrl = `${config.webUrl}/me/benches`;
+  const { db } = ctx;
 
   async function requirePark(slug: string) {
     const park = await parkRepo.findParkBySlug(db, slug);
@@ -146,6 +144,15 @@ export function createAdminService(ctx: AppContext) {
         if (current && input.adoption === 'end') {
           const cancelled = await adoptionRepo.cancelAdoptionChain(tx, current.id);
           await taskRepo.cancelOpenTasksForAdoptions(tx, cancelled);
+          await recordEvent(
+            tx,
+            ctx,
+            {
+              type: 'adoption.cancelled',
+              payload: { email: donor!.adopterEmail, benchCode: bench.code, reason },
+            },
+            { benchId, adoptionId: current.id, actorId: actor.id },
+          );
           outcome = 'Adoption ended early.';
         } else if (current && target) {
           await benchRepo.moveAdoptions(tx, { fromBenchId: benchId, toBenchId: target.id, today });
@@ -157,33 +164,48 @@ export function createAdminService(ctx: AppContext) {
             adoptionId: current.id,
             reportedById: actor.id,
           });
+          await recordEvent(
+            tx,
+            ctx,
+            {
+              type: 'adoption.moved',
+              payload: {
+                email: donor!.adopterEmail,
+                fromCode: bench.code,
+                toCode: target.code,
+                toName: target.name,
+                endDate: current.endDate,
+                reason,
+              },
+            },
+            { benchId: target.id, adoptionId: current.id, actorId: actor.id },
+          );
           outcome = `Adoption moved to ${target.code}.`;
         } else if (current) {
           outcome = `Adoption kept until it ends on ${current.endDate}.`;
         }
         // Record which adoption (if any) the retirement kept running on this bench.
-        const kept = current && input.adoption === 'keep' ? current.id : null;
-        await logEvent(tx, benchId, actor, 'Bench retired', [reason, outcome].filter(Boolean).join(' '), kept);
-        return { bench, donor, target, today };
+        const kept = current && input.adoption === 'keep' ? current : null;
+        await logEvent(tx, benchId, actor, 'Bench retired', [reason, outcome].filter(Boolean).join(' '), kept?.id ?? null);
+        await recordEvent(
+          tx,
+          ctx,
+          {
+            type: 'bench.retired',
+            payload: {
+              code: bench.code,
+              reason,
+              outcome: current ? input.adoption : 'none',
+              // The donor keeps their dedication but can't renew, so tell them now.
+              kept: kept ? { email: donor!.adopterEmail, benchCode: bench.code, endDate: kept.endDate } : null,
+            },
+          },
+          { benchId, adoptionId: kept?.id, actorId: actor.id },
+        );
+        return { today };
       });
 
-      const { bench, donor, target, today } = result;
-      if (donor && input.adoption === 'end') {
-        await notify(ctx, adoptionEndedEmail(donor.adopterEmail, { benchCode: bench.code, reason, manageUrl }));
-      } else if (donor && target) {
-        await notify(
-          ctx,
-          adoptionMovedEmail(donor.adopterEmail, {
-            fromCode: bench.code,
-            toCode: target.code,
-            toName: target.name,
-            endDate: donor.adoption.endDate,
-            reason,
-            manageUrl,
-          }),
-        );
-      }
-      return summary(benchId, today);
+      return summary(benchId, result.today);
     },
 
     async restore(actor: UserRow, benchId: string): Promise<BenchSummary> {
@@ -193,6 +215,10 @@ export function createAdminService(ctx: AppContext) {
         if (bench!.status === 'active') throw conflict('not_retired', 'This bench is already in the program.');
         await benchRepo.updateBench(tx, benchId, { status: 'active' });
         await logEvent(tx, benchId, actor, 'Bench returned to the program', null);
+        await recordEvent(tx, ctx, { type: 'bench.restored', payload: { code: bench!.code } }, {
+          benchId,
+          actorId: actor.id,
+        });
       });
       return summary(benchId, todayIn(found.timezone, ctx.clock.now()));
     },

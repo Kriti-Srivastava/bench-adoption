@@ -117,6 +117,7 @@ describe('adopting', () => {
 
     expect((await list('?availability=adopted')).items).toHaveLength(1);
     expect((await list('?availability=available')).items).toHaveLength(2);
+    await t.services.outbox.dispatch(100); // the worker delivers queued emails
     expect(t.mailer.sent.at(-1)).toMatchObject({
       to: 'donor@example.org',
       subject: "You've adopted bench T-001",

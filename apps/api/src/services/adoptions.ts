@@ -8,7 +8,6 @@ import {
   type IsoDate,
 } from '@bench/shared';
 import type { Executor } from '../db/client.ts';
-import { adoptionConfirmedEmail } from '../email/templates.ts';
 import { toCsv } from '../http/csv.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
@@ -17,9 +16,9 @@ import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
 import type { UserRow } from '../repositories/users.ts';
 import { withAdoptionLocked, withBenchesLocked } from './consistency.ts';
+import { recordEvent } from './events.ts';
 import type { AppContext } from './context.ts';
 import { toAdminAdoption, toAdoption } from './mappers.ts';
-import { notify } from './notify.ts';
 
 export interface AdoptInput {
   benchId: string;
@@ -31,7 +30,6 @@ export interface AdoptInput {
 
 export function createAdoptionService(ctx: AppContext) {
   const { db } = ctx;
-  const manageUrl = `${ctx.config.webUrl}/me/benches`;
 
   /**
    * Checks a (locked) bench can take an adoption of `months`, and returns
@@ -51,19 +49,23 @@ export function createAdoptionService(ctx: AppContext) {
   const view = async (tx: Executor, id: string) =>
     toAdoption((await adoptionRepo.findAdoptionView(tx, id))!, ctx.clock.now());
 
-  async function confirm(user: UserRow, a: Adoption, renewal: boolean) {
-    await notify(
+  /** Records the adoption (and queues the donor's confirmation) in the same transaction. */
+  const confirm = (tx: Executor, user: UserRow, a: Adoption, renewal: boolean) =>
+    recordEvent(
+      tx,
       ctx,
-      adoptionConfirmedEmail(user.email, {
-        benchCode: a.benchCode,
-        benchName: a.benchName,
-        startDate: a.startDate,
-        endDate: a.endDate,
-        manageUrl,
-        renewal,
-      }),
+      {
+        type: renewal ? 'adoption.renewed' : 'adoption.created',
+        payload: {
+          email: user.email,
+          benchCode: a.benchCode,
+          benchName: a.benchName,
+          startDate: a.startDate,
+          endDate: a.endDate,
+        },
+      },
+      { benchId: a.benchId, adoptionId: a.id, actorId: user.id },
     );
-  }
 
   return {
     /** Adopts a bench starting today, and queues its plaque (typically fitted within 6-8 weeks). */
@@ -86,9 +88,10 @@ export function createAdoptionService(ctx: AppContext) {
           details: input.dedication,
           adoptionId: row.id,
         });
-        return view(tx, row.id);
+        const adoption = await view(tx, row.id);
+        await confirm(tx, user, adoption, false);
+        return adoption;
       });
-      await confirm(user, adoption, false);
       return adoption;
     },
 
@@ -118,9 +121,10 @@ export function createAdoptionService(ctx: AppContext) {
           isAnonymous: prev.isAnonymous,
           renewedFromId: prev.id,
         });
-        return view(tx, row.id);
+        const renewal = await view(tx, row.id);
+        await confirm(tx, user, renewal, true);
+        return renewal;
       });
-      await confirm(user, adoption, true);
       return adoption;
     },
 
@@ -165,9 +169,18 @@ export function createAdoptionService(ctx: AppContext) {
 
     /** Cancels an adoption, any renewals that follow it, and their pending plaque work. */
     async cancel(adoptionId: string): Promise<Adoption> {
-      return withAdoptionLocked(db, adoptionId, async (tx) => {
+      return withAdoptionLocked(db, adoptionId, async (tx, current) => {
         const cancelled = await adoptionRepo.cancelAdoptionChain(tx, adoptionId);
         await taskRepo.cancelOpenTasksForAdoptions(tx, cancelled);
+        await recordEvent(
+          tx,
+          ctx,
+          {
+            type: 'adoption.cancelled',
+            payload: { email: current.adopterEmail, benchCode: current.benchCode, reason: null },
+          },
+          { benchId: current.adoption.benchId, adoptionId },
+        );
         return view(tx, adoptionId);
       });
     },

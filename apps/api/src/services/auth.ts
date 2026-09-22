@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Me, Role } from '@bench/shared';
-import { magicLinkEmail } from '../email/templates.ts';
 import { AppError, conflict, notFound, tooManyRequests } from '../errors.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
 import type { AppContext } from './context.ts';
+import { recordEvent } from './events.ts';
 
 const newToken = () => randomBytes(32).toString('base64url');
 /** Tokens are stored hashed, so a database leak doesn't expose live links or sessions. */
@@ -48,10 +48,17 @@ export function createAuthService(ctx: AppContext) {
           expiresAt: new Date(now.getTime() + config.magicLinkTtlMinutes * MINUTE),
           createdAt: now,
         });
+        // Queued with the token, so a mail outage delays the link rather than
+        // failing the request (and the person is not locked out by the limit).
+        await recordEvent(tx, ctx, {
+          type: 'signin.requested',
+          payload: {
+            email,
+            link: `${config.webUrl}/auth/verify?token=${encodeURIComponent(token)}`,
+            ttlMinutes: config.magicLinkTtlMinutes,
+          },
+        });
       });
-      const link = `${config.webUrl}/auth/verify?token=${encodeURIComponent(token)}`;
-      // Unlike confirmations, a failed sign-in email is the user's whole request.
-      await ctx.mailer.send(magicLinkEmail(email, { link, ttlMinutes: config.magicLinkTtlMinutes }));
     },
 
     /** Redeems a magic link and opens a session. */

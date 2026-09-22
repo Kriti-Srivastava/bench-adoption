@@ -104,13 +104,17 @@ describe('🐒 chaos', () => {
       const results = await Promise.all(ids.map((id, i) => adopt(actors.donors[i]!.cookie, id, 1)));
       expect(results.map((r) => r.statusCode)).toEqual(ids.map(() => 201));
 
-      // The daily job runs a few times during the outage...
+      // The daily job and worker run a few times during the outage...
       t.mailer.sent.length = 0;
-      for (let i = 0; i < 4; i++) await t.services.reminders.sendDueReminders();
-      // ...then mail recovers and it runs again.
+      for (let i = 0; i < 4; i++) {
+        await t.services.reminders.enqueueDueReminders();
+        await t.services.outbox.dispatch(100);
+        t.clock.advance(30 * 60_000); // past the retry backoff
+      }
+      // ...then mail recovers and the worker catches up.
       flaky.heal();
-      await t.services.reminders.sendDueReminders();
-      await t.services.reminders.sendDueReminders();
+      await t.services.reminders.enqueueDueReminders();
+      await t.services.outbox.dispatch(100);
 
       const reminded = t.mailer.sent.filter((m) => m.subject.includes('ends in')).map((m) => m.to);
       expect(reminded.sort()).toEqual(actors.donors.map((d) => d.email).sort()); // everyone, once
@@ -120,27 +124,36 @@ describe('🐒 chaos', () => {
     }
   });
 
-  it('mail outage: a sign-in email that failed to send does not lock the person out', async () => {
+  it('mail outage: a sign-in link is queued and delivered when mail recovers', async () => {
     await setUpPark(t, 3, 0);
+    t.mailer.sent.length = 0; // the park setup signed staff in
     const realSend = t.mailer.send;
     t.mailer.send = async () => {
       throw new Error('chaos: mail provider unavailable');
     };
-    const failed = await t.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/magic-link',
-      payload: { email: 'unlucky@example.org' },
-    });
-    t.mailer.send = realSend;
-    expect(failed.statusCode).toBeGreaterThanOrEqual(500);
+    try {
+      // The request succeeds during the outage: the link is queued, not lost.
+      const requested = await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/magic-link',
+        payload: { email: 'unlucky@example.org' },
+      });
+      expect(requested.statusCode).toBe(204);
+      await t.services.outbox.dispatch();
+      expect(t.mailer.sent).toHaveLength(0);
+    } finally {
+      // Always put the mailer back, even if an expectation above failed,
+      // so a failure here can't cascade into the next scenario.
+      t.mailer.send = realSend;
+    }
 
-    // Mail is back; the person tries again straight away and should get their link.
-    const retry = await t.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/magic-link',
-      payload: { email: 'unlucky@example.org' },
+    // Mail recovers; the worker delivers the link without the person asking again.
+    t.clock.advance(2 * 60_000); // past the backoff
+    await t.services.outbox.dispatch();
+    expect(t.mailer.sent.at(-1)).toMatchObject({
+      to: 'unlucky@example.org',
+      subject: 'Your sign-in link',
     });
-    expect(retry.statusCode).toBe(204);
   });
 
   it('clock chaos: time jumps never duplicate or misdirect reminders', async () => {
@@ -150,10 +163,11 @@ describe('🐒 chaos', () => {
     await Promise.all(ids.map((id, i) => adopt(actors.donors[i]!.cookie, id, random.pick([1, 12, 24]))));
     t.mailer.sent.length = 0;
 
-    // Leap forward by random amounts (hours to months), running the daily job after each leap.
+    // Leap forward by random amounts (hours to months), running the daily job and worker after each leap.
     for (let i = 0; i < 25; i++) {
       t.clock.advance((1 + random.int(40 * 24)) * 3_600_000);
-      await t.services.reminders.sendDueReminders();
+      await t.services.reminders.enqueueDueReminders();
+      await t.services.outbox.dispatch(100);
     }
 
     const perDonor = new Map<string, string[]>();

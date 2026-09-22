@@ -13,8 +13,11 @@ beforeEach(async () => {
   ({ benches } = await resetData(t));
 });
 
-const requestLink = (payload: Record<string, unknown>) =>
-  t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload });
+const requestLink = async (payload: Record<string, unknown>) => {
+  const res = await t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload });
+  await t.services.outbox.dispatch(100); // stand in for the worker
+  return res;
+};
 
 const lastToken = () =>
   new URL(t.mailer.sent.at(-1)!.text.match(/https?:\/\/\S+/)![0]).searchParams.get('token');
@@ -121,22 +124,29 @@ describe('renewal reminders', () => {
 
   const reminders = () => t.mailer.sent.filter((m) => m.subject.includes('ends in'));
 
+  /** The daily job queues reminders; the worker delivers them. Returns how many were queued. */
+  async function runDailyJobAndWorker(): Promise<number> {
+    const queued = await t.services.reminders.enqueueDueReminders();
+    await t.services.outbox.dispatch(100);
+    return queued;
+  }
+
   it('sends each reminder once as the end date approaches', async () => {
     await adoptFor(12); // ends 2027-09-21
     t.mailer.sent.length = 0;
 
     t.clock.set('2027-06-01');
-    expect(await t.services.reminders.sendDueReminders()).toBe(0);
+    expect(await runDailyJobAndWorker()).toBe(0);
 
     t.clock.set('2027-08-01'); // 51 days left
-    expect(await t.services.reminders.sendDueReminders()).toBe(1);
-    expect(await t.services.reminders.sendDueReminders()).toBe(0);
+    expect(await runDailyJobAndWorker()).toBe(1);
+    expect(await runDailyJobAndWorker()).toBe(0);
 
     t.clock.set('2027-09-01'); // 20 days left
-    expect(await t.services.reminders.sendDueReminders()).toBe(1);
+    expect(await runDailyJobAndWorker()).toBe(1);
 
     t.clock.set('2027-09-16'); // 5 days left
-    expect(await t.services.reminders.sendDueReminders()).toBe(1);
+    expect(await runDailyJobAndWorker()).toBe(1);
 
     expect(reminders().map((m) => m.subject)).toEqual([
       'Bench T-001: your adoption ends in 51 days',
@@ -148,8 +158,8 @@ describe('renewal reminders', () => {
 
   it('skips reminders it missed rather than sending them all at once', async () => {
     await adoptFor(1); // ends 2026-10-21, 30 days away
-    expect(await t.services.reminders.sendDueReminders()).toBe(1);
-    expect(await t.services.reminders.sendDueReminders()).toBe(0);
+    expect(await runDailyJobAndWorker()).toBe(1);
+    expect(await runDailyJobAndWorker()).toBe(0);
   });
 
   it('stops once the adoption is renewed', async () => {
@@ -161,20 +171,27 @@ describe('renewal reminders', () => {
       payload: { months: 12 },
     });
     t.clock.set('2027-09-01');
-    expect(await t.services.reminders.sendDueReminders()).toBe(0);
+    expect(await runDailyJobAndWorker()).toBe(0);
   });
 
-  it('retries a reminder whose email failed', async () => {
+  it('delivers a reminder whose first send failed, without queueing it twice', async () => {
     await adoptFor(1);
+    t.mailer.sent.length = 0;
     const send = t.mailer.send;
     t.mailer.send = async () => {
       throw new Error('SMTP down');
     };
     try {
-      expect(await t.services.reminders.sendDueReminders()).toBe(0);
+      // Queued once; the attempt fails and is scheduled for a retry.
+      expect(await runDailyJobAndWorker()).toBe(1);
+      expect(reminders()).toHaveLength(0);
+      // The job runs again during the outage: nothing is queued twice.
+      expect(await runDailyJobAndWorker()).toBe(0);
     } finally {
       t.mailer.send = send;
     }
-    expect(await t.services.reminders.sendDueReminders()).toBe(1);
+    t.clock.advance(2 * 60_000); // past the backoff
+    await t.services.outbox.dispatch();
+    expect(reminders()).toHaveLength(1);
   });
 });
