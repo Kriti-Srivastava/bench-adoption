@@ -1,4 +1,3 @@
-import { stringify } from 'csv-stringify/sync';
 import {
   addDays,
   addMonths,
@@ -10,6 +9,7 @@ import {
 } from '@bench/shared';
 import { PG, pgErrorCode, retryOnContention } from '../db/client.ts';
 import { adoptionConfirmedEmail } from '../email/templates.ts';
+import { toCsv } from '../http/csv.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as benchRepo from '../repositories/benches.ts';
@@ -160,7 +160,7 @@ export function createAdoptionService(ctx: AppContext) {
     },
 
     toCsv(items: AdminAdoption[]): string {
-      return stringify(
+      return toCsv(
         items.map((a) => ({
           bench_code: a.benchCode,
           bench_name: a.benchName,
@@ -173,7 +173,6 @@ export function createAdoptionService(ctx: AppContext) {
           end_date: a.endDate,
           renewed: a.isRenewed ? 'yes' : 'no',
         })),
-        { header: true },
       );
     },
 

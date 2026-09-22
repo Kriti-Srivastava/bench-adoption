@@ -86,14 +86,7 @@ export const api = {
     request<BenchDetail>(`/parks/${slug}/benches/${encodeURIComponent(code)}`),
 
   /** The signed-in user, or null when signed out. */
-  async me(): Promise<Me | null> {
-    try {
-      return await request<Me>('/me');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) return null;
-      throw err;
-    }
-  },
+  me: () => request<{ user: Me | null }>('/session').then((s) => s.user),
   updateMe: (fullName: string) => request<Me>('/me', { method: 'PATCH', body: { fullName } }),
   requestMagicLink: (email: string, redirectTo?: string) =>
     request<void>('/auth/magic-link', { method: 'POST', body: { email, redirectTo } }),

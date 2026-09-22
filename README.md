@@ -65,6 +65,14 @@ Key design decisions:
 - **Renewals keep history.** A renewal is a new adoption that starts the day
   the previous one ends, linked by `renewed_from_id`. A unique index allows
   each adoption to be renewed only once, so renewals form a chain.
+- **Private by default.** Every route declares who its responses are for
+  (`config: { cache: 'public' }`). Anything else gets `Cache-Control:
+  private, no-store`, and errors are never cached, so a new endpoint can't
+  leak one person's data through a CDN. A test pins the exact list of public
+  routes.
+- **Safe exports.** All CSV goes through one module that neutralises
+  spreadsheet formulas in donor-written text (OWASP CSV injection). This is
+  output encoding: stored data is never altered.
 - **Privacy.** Public endpoints only return the donor's chosen display name,
   or "Anonymous donor". Response schemas strip everything else, so an email
   can't leak through the public endpoints. Staff endpoints include contact details.
@@ -169,6 +177,14 @@ at `/api/docs`.
 - **Web:** `npm run build` produces static files in `apps/web/dist`. Serve them
   from a CDN on the same domain as the API, routing `/api/*` to the API so the
   session cookie stays first-party.
+- **Configuration:** set `NODE_ENV=production`. The API then defaults to
+  secure cookies and refuses to start without `DATABASE_URL`, an `https://`
+  `WEB_URL`, `SMTP_HOST` and `MAIL_FROM`.
+- **Health checks:** `/api/health/live` (restart if failing) and
+  `/api/health/ready` (route traffic if passing). Postgres is critical and
+  makes the instance unready. Redis is optional: without it the API reports
+  `degraded` and keeps serving, and per-IP limits pause while the
+  per-address sign-in limit (in Postgres) still applies.
 - **Daily job:** schedule `npm run jobs:daily -w @bench/api` (renewal reminders and clean-up of expired sign-in links and sessions).
 
 ## Scaling and performance

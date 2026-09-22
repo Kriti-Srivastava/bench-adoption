@@ -185,6 +185,9 @@ export const me = z.object({
 });
 export type Me = z.infer<typeof me>;
 
+/** Who is signed in, if anyone. Signed out is a normal answer, not an error. */
+export const session = z.object({ user: me.nullable() });
+
 export const verifyMagicLinkResult = z.object({
   user: me,
   redirectTo: z.string().nullable(),

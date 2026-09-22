@@ -1,6 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import {
   me,
+  session,
   requestMagicLinkInput,
   updateMeInput,
   verifyMagicLinkInput,
@@ -50,6 +51,12 @@ export const authRoutes =
       clearSessionCookie(reply);
       return reply.code(204).send();
     });
+
+    app.get(
+      '/session',
+      { schema: { tags, response: { 200: session } } },
+      async (req) => ({ user: req.user ? toMe(req.user) : null }),
+    );
 
     app.get('/me', { schema: { tags, response: { 200: me } } }, async (req) =>
       toMe(requireUser(req)),

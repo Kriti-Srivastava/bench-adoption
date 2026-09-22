@@ -5,20 +5,21 @@ import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify, { type FastifyError, type FastifyServerOptions } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyServerOptions } from 'fastify';
 import {
   hasZodFastifySchemaValidationErrors,
   jsonSchemaTransform,
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
-import { sql } from 'drizzle-orm';
 import type { ErrorResponse } from '@bench/shared';
 import { registerSessionAuth } from './auth/session.ts';
+import { registerResponsePolicy } from './http/policy.ts';
 import { fastSerializerCompiler } from './serializer.ts';
 import { AppError } from './errors.ts';
 import { adoptionRoutes } from './routes/adoptions.ts';
 import { authRoutes } from './routes/auth.ts';
+import { registerHealthRoutes } from './routes/health.ts';
 import { publicRoutes } from './routes/public.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { staffRoutes } from './routes/staff.ts';
@@ -26,6 +27,24 @@ import type { AppContext } from './services/context.ts';
 import { createServices } from './services/index.ts';
 
 const errorBody = (code: string, message: string): ErrorResponse => ({ error: { code, message } });
+
+/**
+ * A Redis client that fails fast instead of queueing commands while
+ * disconnected, and logs outages once per transition rather than per retry.
+ */
+function connectRedis(url: string, log: FastifyBaseLogger): Redis {
+  const redis = new Redis(url, { connectTimeout: 500, maxRetriesPerRequest: 1, enableOfflineQueue: false });
+  let down = false;
+  redis.on('error', (err) => {
+    if (!down) log.warn({ err }, 'Redis unavailable: per-IP rate limits paused');
+    down = true;
+  });
+  redis.on('ready', () => {
+    if (down) log.info('Redis reconnected: per-IP rate limits resumed');
+    down = false;
+  });
+  return redis;
+}
 
 export async function buildApp(
   deps: Omit<AppContext, 'log'>,
@@ -41,20 +60,23 @@ export async function buildApp(
 
   const ctx: AppContext = { ...deps, log: app.log };
   const services = createServices(ctx);
+  const routePolicies = registerResponsePolicy(app);
 
   await app.register(cookie);
   // Gzip/brotli: the map's bench list is ~130 KB of JSON and compresses ~10x.
   await app.register(compress, { threshold: 1024 });
   // Weak ETags let browsers and CDNs revalidate with a 304 instead of re-downloading.
   await app.register(etag, { weak: true });
-  // In-memory limits are per instance; with REDIS_URL all instances share one count.
-  const redis = deps.config.redisUrl
-    ? new Redis(deps.config.redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1 })
-    : undefined;
-  if (redis) app.addHook('onClose', async () => void (await redis.quit()));
+  // Per-IP limits are in memory per instance, or shared via Redis when configured.
+  const redis = deps.config.redisUrl ? connectRedis(deps.config.redisUrl, app.log) : undefined;
+  if (redis) app.addHook('onClose', async () => void redis.disconnect());
   await app.register(rateLimit, {
     global: false,
     redis,
+    // Redis is a helper, not a dependency: if it's unreachable, skip the
+    // per-IP limit rather than fail the request. Sign-in stays protected by
+    // the per-address limit, which lives in Postgres.
+    skipOnError: true,
     errorResponseBuilder: (_req, context) => ({
       statusCode: 429,
       code: 'rate_limited',
@@ -97,10 +119,7 @@ export async function buildApp(
     reply.code(404).send(errorBody('not_found', 'No such endpoint.')),
   );
 
-  app.get('/api/health', async () => {
-    await deps.db.execute(sql`select 1`);
-    return { ok: true };
-  });
+  registerHealthRoutes(app, { db: deps.db, redis });
 
   await app.register(
     async (v1) => {
@@ -113,5 +132,5 @@ export async function buildApp(
     { prefix: '/api/v1' },
   );
 
-  return { app, services };
+  return { app, services, routePolicies };
 }

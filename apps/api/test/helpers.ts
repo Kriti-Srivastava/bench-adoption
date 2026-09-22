@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { buildApp } from '../src/app.ts';
-import { loadConfig } from '../src/config.ts';
+import { loadConfig, type Config } from '../src/config.ts';
 import { createDb } from '../src/db/client.ts';
 import { createMemoryMailer } from '../src/email/mailer.ts';
 import * as benchRepo from '../src/repositories/benches.ts';
@@ -27,17 +27,18 @@ export function createTestClock(start: string) {
   };
 }
 
-export async function createTestApp() {
-  const config = {
+export async function createTestApp(overrides: Partial<Config> = {}) {
+  const config: Config = {
     ...loadConfig({ WEB_URL: 'http://web.test', AUTH_RATE_LIMIT_PER_MINUTE: '1000' }),
     databaseUrl: TEST_DATABASE_URL,
+    ...overrides,
   };
   const { db, close } = createDb(TEST_DATABASE_URL);
   const mailer = createMemoryMailer();
   const clock = createTestClock('2026-09-21T16:00:00Z');
-  const { app, services } = await buildApp({ db, config, clock, mailer });
+  const { app, services, routePolicies } = await buildApp({ db, config, clock, mailer });
   app.addHook('onClose', close);
-  return { app, services, db, mailer, clock };
+  return { app, services, routePolicies, db, mailer, clock };
 }
 
 export type TestApp = Awaited<ReturnType<typeof createTestApp>>;

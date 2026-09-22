@@ -4,6 +4,7 @@ import { loadConfig } from './config.ts';
 import { createDb } from './db/client.ts';
 import { createSmtpMailer } from './email/mailer.ts';
 
+// Refuses to start with an unsafe production configuration (see config.ts).
 const config = loadConfig();
 const { db, close } = createDb(config.databaseUrl, { max: config.dbPoolMax });
 const { app } = await buildApp(
