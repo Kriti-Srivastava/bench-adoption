@@ -1,0 +1,25 @@
+{
+  "name": "bench-adoption",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @bench/api\" \"npm run dev -w @bench/web\"",
+    "db:up": "docker compose up -d",
+    "db:migrate": "npm run db:migrate -w @bench/api",
+    "db:seed": "npm run db:seed -w @bench/api",
+    "test": "npm test -w @bench/shared && npm test -w @bench/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @bench/web"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "concurrently": "^10.0.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.1"
+  }
+}

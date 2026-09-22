@@ -1,0 +1,86 @@
+import { sql } from 'drizzle-orm';
+import { buildApp } from '../src/app.ts';
+import { loadConfig } from '../src/config.ts';
+import { createDb } from '../src/db/client.ts';
+import { createMemoryMailer } from '../src/email/mailer.ts';
+import * as benchRepo from '../src/repositories/benches.ts';
+import * as parkRepo from '../src/repositories/parks.ts';
+import * as userRepo from '../src/repositories/users.ts';
+
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? 'postgres://bench:bench@localhost:5442/bench_test';
+
+export const PARK = 'test-park';
+
+/** A clock tests can move: `clock.set('2027-01-01')`. */
+export function createTestClock(start: string) {
+  let current = new Date(start);
+  return {
+    now: () => current,
+    /** Noon in New York on the given date, so "today" is unambiguous. */
+    set(date: string) {
+      current = new Date(`${date}T16:00:00Z`);
+    },
+  };
+}
+
+export async function createTestApp() {
+  const config = {
+    ...loadConfig({ WEB_URL: 'http://web.test', AUTH_RATE_LIMIT_PER_MINUTE: '1000' }),
+    databaseUrl: TEST_DATABASE_URL,
+  };
+  const { db, close } = createDb(TEST_DATABASE_URL);
+  const mailer = createMemoryMailer();
+  const clock = createTestClock('2026-09-21T16:00:00Z');
+  const { app, services } = await buildApp({ db, config, clock, mailer });
+  app.addHook('onClose', close);
+  return { app, services, db, mailer, clock };
+}
+
+export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
+
+/** Empties every table and loads one park with three benches. */
+export async function resetData({ db, mailer }: TestApp) {
+  await db.execute(sql`
+    truncate reminders_sent, adoptions, sessions, auth_tokens, users, benches, parks
+    restart identity cascade
+  `);
+  mailer.sent.length = 0;
+  const park = await parkRepo.upsertPark(db, {
+    slug: PARK,
+    name: 'Test Park',
+    timezone: 'America/New_York',
+  });
+  const benches = [];
+  for (const [i, zone] of ['Lake', 'Lake', 'Meadow'].entries()) {
+    benches.push(
+      await benchRepo.insertBench(db, {
+        parkId: park.id,
+        code: `T-00${i + 1}`,
+        name: `Test bench ${i + 1}`,
+        zone,
+        lat: 40.9,
+        lng: -73.89,
+      }),
+    );
+  }
+  return { park, benches: benches as [(typeof benches)[0], (typeof benches)[0], (typeof benches)[0]] };
+}
+
+/** Signs in through the real magic-link flow and returns the session cookie. */
+export async function signIn(t: TestApp, email: string, role?: 'staff' | 'admin') {
+  await t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload: { email } });
+  const message = t.mailer.sent.findLast((m) => m.to === email);
+  const token = new URL(message!.text.match(/https?:\/\/\S+/)![0]).searchParams.get('token');
+  const res = await t.app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/verify',
+    payload: { token },
+  });
+  if (role) {
+    const user = await userRepo.findOrCreateUser(t.db, email);
+    await userRepo.updateUser(t.db, user.id, { role });
+  }
+  const cookie = res.cookies.find((c) => c.name === 'sid')!;
+  return { cookie: `sid=${cookie.value}` };
+}

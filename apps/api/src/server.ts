@@ -1,0 +1,19 @@
+import { buildApp } from './app.ts';
+import { systemClock } from './clock.ts';
+import { loadConfig } from './config.ts';
+import { createDb } from './db/client.ts';
+import { createSmtpMailer } from './email/mailer.ts';
+
+const config = loadConfig();
+const { db, close } = createDb(config.databaseUrl);
+const { app } = await buildApp(
+  { db, config, clock: systemClock, mailer: createSmtpMailer(config.smtp) },
+  { logger: { level: 'info' } },
+);
+
+app.addHook('onClose', close);
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => void app.close());
+}
+
+await app.listen({ port: config.port, host: '0.0.0.0' });

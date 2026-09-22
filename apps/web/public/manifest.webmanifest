@@ -1,0 +1,9 @@
+{
+  "name": "Adopt a Bench · Van Cortlandt Park",
+  "short_name": "Adopt a Bench",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f4ee",
+  "theme_color": "#2f5d3a",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
