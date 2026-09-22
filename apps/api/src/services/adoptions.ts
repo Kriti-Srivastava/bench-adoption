@@ -2,14 +2,15 @@ import { stringify } from 'csv-stringify/sync';
 import {
   addDays,
   addMonths,
+  termsLabel,
   todayIn,
   type AdminAdoption,
   type Adoption,
   type IsoDate,
 } from '@bench/shared';
-import { PG, pgErrorCode } from '../db/client.ts';
+import { PG, pgErrorCode, retryOnContention } from '../db/client.ts';
 import { adoptionConfirmedEmail } from '../email/templates.ts';
-import { conflict, notFound } from '../errors.ts';
+import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as benchRepo from '../repositories/benches.ts';
 import * as taskRepo from '../repositories/maintenance.ts';
@@ -31,12 +32,15 @@ export function createAdoptionService(ctx: AppContext) {
   const { db } = ctx;
   const manageUrl = `${ctx.config.webUrl}/me/benches`;
 
-  /** An adoptable bench and today's date in its park. */
-  async function requireAdoptableBench(benchId: string) {
-    const found = await benchRepo.findBenchWithTimezone(db, benchId);
+  /** An adoptable bench and today's date in its park; `months` must be a term the park offers. */
+  async function requireAdoptableBench(benchId: string, months: number) {
+    const found = await benchRepo.findBenchWithParkRules(db, benchId);
     if (!found) throw notFound('Bench');
     if (found.bench.status !== 'active') {
       throw conflict('bench_retired', 'This bench is no longer part of the program.');
+    }
+    if (!found.adoptionTermsMonths.includes(months)) {
+      throw badRequest('invalid_term', `This park offers adoptions of ${termsLabel(found.adoptionTermsMonths)}.`);
     }
     return { bench: found.bench, today: todayIn(found.timezone, ctx.clock.now()) };
   }
@@ -48,7 +52,7 @@ export function createAdoptionService(ctx: AppContext) {
    */
   async function insert(values: adoptionRepo.NewAdoption): Promise<Adoption> {
     try {
-      const row = await adoptionRepo.insertAdoption(db, values);
+      const row = await retryOnContention(() => adoptionRepo.insertAdoption(db, values));
       return toAdoption((await adoptionRepo.findAdoptionView(db, row.id))!, ctx.clock.now());
     } catch (err) {
       switch (pgErrorCode(err)) {
@@ -79,7 +83,7 @@ export function createAdoptionService(ctx: AppContext) {
   return {
     /** Adopts a bench starting today. */
     async adopt(user: UserRow, input: AdoptInput): Promise<Adoption> {
-      const { bench, today } = await requireAdoptableBench(input.benchId);
+      const { bench, today } = await requireAdoptableBench(input.benchId, input.months);
       const adoption = await insert({
         benchId: bench.id,
         adopterId: user.id,
@@ -108,7 +112,7 @@ export function createAdoptionService(ctx: AppContext) {
       if (!current || current.adoption.adopterId !== user.id) throw notFound('Adoption');
 
       const prev = current.adoption;
-      const { today } = await requireAdoptableBench(prev.benchId);
+      const { today } = await requireAdoptableBench(prev.benchId, months);
       if (prev.status !== 'active') {
         throw conflict('adoption_cancelled', 'This adoption was cancelled.');
       }

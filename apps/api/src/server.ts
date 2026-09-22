@@ -5,7 +5,7 @@ import { createDb } from './db/client.ts';
 import { createSmtpMailer } from './email/mailer.ts';
 
 const config = loadConfig();
-const { db, close } = createDb(config.databaseUrl);
+const { db, close } = createDb(config.databaseUrl, { max: config.dbPoolMax });
 const { app } = await buildApp(
   { db, config, clock: systemClock, mailer: createSmtpMailer(config.smtp) },
   { logger: { level: 'info' } },

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Me, Role } from '@bench/shared';
 import { magicLinkEmail } from '../email/templates.ts';
-import { AppError, conflict, notFound } from '../errors.ts';
+import { AppError, conflict, notFound, tooManyRequests } from '../errors.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
 import type { AppContext } from './context.ts';
@@ -30,11 +30,24 @@ export function createAuthService(ctx: AppContext) {
      */
     async requestMagicLink(email: string, redirectTo: string | null): Promise<void> {
       const token = newToken();
-      await userRepo.insertAuthToken(db, {
-        tokenHash: hashToken(token),
-        email,
-        redirectTo,
-        expiresAt: new Date(ctx.clock.now().getTime() + config.magicLinkTtlMinutes * MINUTE),
+      const now = ctx.clock.now();
+      const limits = config.magicLinkPerEmail;
+      await db.transaction(async (tx) => {
+        await userRepo.lockEmail(tx, email);
+        const recent = await userRepo.recentAuthTokens(tx, email, new Date(now.getTime() - 60 * MINUTE));
+        if (recent.latest && now.getTime() - recent.latest.getTime() < limits.minIntervalSeconds * 1000) {
+          throw tooManyRequests('A sign-in link was just sent to this address. Please wait a minute and try again.');
+        }
+        if (recent.count >= limits.maxPerHour) {
+          throw tooManyRequests('Too many sign-in links were requested for this address. Please try again later.');
+        }
+        await userRepo.insertAuthToken(tx, {
+          tokenHash: hashToken(token),
+          email,
+          redirectTo,
+          expiresAt: new Date(now.getTime() + config.magicLinkTtlMinutes * MINUTE),
+          createdAt: now,
+        });
       });
       const link = `${config.webUrl}/auth/verify?token=${encodeURIComponent(token)}`;
       // Unlike confirmations, a failed sign-in email is the user's whole request.
@@ -71,7 +84,7 @@ export function createAuthService(ctx: AppContext) {
       return (await userRepo.updateUser(db, user.id, { fullName }))!;
     },
 
-    /** Deletes used or expired sign-in links and expired sessions. */
+    /** Deletes expired sessions and day-old sign-in links. */
     async purgeExpired() {
       return userRepo.purgeExpiredAuth(db, ctx.clock.now());
     },

@@ -16,7 +16,7 @@ import {
   type RetireBenchInput,
   type Role,
 } from '@bench/shared';
-import { PG, pgErrorCode } from '../db/client.ts';
+import { PG, pgErrorCode, retryOnContention } from '../db/client.ts';
 import { adoptionEndedEmail, adoptionMovedEmail } from '../email/templates.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
@@ -56,7 +56,7 @@ export function createAdminService(ctx: AppContext) {
   }
 
   async function requireBench(benchId: string) {
-    const found = await benchRepo.findBenchWithTimezone(db, benchId);
+    const found = await benchRepo.findBenchWithParkRules(db, benchId);
     if (!found) throw notFound('Bench');
     const today = todayIn(found.timezone, ctx.clock.now());
     const current = (await benchRepo.findBench(db, { id: benchId }, today))!;
@@ -135,7 +135,7 @@ export function createAdminService(ctx: AppContext) {
       }
 
       try {
-        await db.transaction(async (tx) => {
+        await retryOnContention(() => db.transaction(async (tx) => {
           await benchRepo.updateBench(tx, benchId, { status: 'retired' });
           let outcome = 'No active adoption.';
           if (current && input.adoption === 'end') {
@@ -157,7 +157,7 @@ export function createAdminService(ctx: AppContext) {
             outcome = `Adoption kept until it ends on ${current.endDate}.`;
           }
           await logEvent(tx, benchId, actor, 'Bench retired', [reason, outcome].filter(Boolean).join(' '));
-        });
+        }));
       } catch (err) {
         // Another adoption claimed the target bench between our check and the move.
         if (pgErrorCode(err) === PG.exclusionViolation) {

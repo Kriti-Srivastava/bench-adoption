@@ -18,12 +18,13 @@ export async function listParks(db: Executor): Promise<ParkRow[]> {
 
 export async function upsertPark(
   db: Executor,
-  values: { slug: string; name: string; timezone: string },
+  values: { slug: string; name: string; timezone: string; adoptionTermsMonths?: number[] },
 ): Promise<ParkRow> {
+  const { slug: _slug, ...changes } = values;
   const [row] = await db
     .insert(parks)
     .values(values)
-    .onConflictDoUpdate({ target: parks.slug, set: { name: values.name, timezone: values.timezone } })
+    .onConflictDoUpdate({ target: parks.slug, set: changes })
     .returning();
   return row!;
 }

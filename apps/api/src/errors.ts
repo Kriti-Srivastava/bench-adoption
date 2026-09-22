@@ -20,3 +20,4 @@ export const forbidden = (message = 'You do not have access to this.') =>
   new AppError(403, 'forbidden', message);
 export const notFound = (what: string) => new AppError(404, 'not_found', `${what} not found.`);
 export const conflict = (code: string, message: string) => new AppError(409, code, message);
+export const tooManyRequests = (message: string) => new AppError(429, 'too_many_requests', message);

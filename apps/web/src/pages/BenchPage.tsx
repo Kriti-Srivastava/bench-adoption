@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import type { BenchDetail, Park } from '@bench/shared';
+import { termsLabel, type BenchDetail, type Park } from '@bench/shared';
 import { BenchMap } from '../components/BenchMap.tsx';
 import { ReportProblem } from '../components/ReportProblem.tsx';
 import { Loadable, StatusBadge } from '../components/ui.tsx';
@@ -88,6 +88,7 @@ function AboutThisSpot({ park, bench }: { park: Park; bench: BenchDetail }) {
 
 function AdoptionPanel({ slug, bench }: { slug: string; bench: BenchDetail }) {
   const current = bench.currentAdoption;
+  const terms = usePark(slug).data?.adoptionTermsMonths ?? [];
 
   if (bench.status === 'retired') {
     return <p className="notice">This bench is no longer part of the adoption program.</p>;
@@ -117,8 +118,8 @@ function AdoptionPanel({ slug, bench }: { slug: string; bench: BenchDetail }) {
         <>
           <h2>Available to adopt</h2>
           <p className="muted">
-            Adopt this bench for as long as you like, from 1 month to 5 years. Your name or
-            dedication will be shown here.
+            Adopt this bench to support the park. Your name or dedication will be shown here
+            {terms.length > 0 && <> for {termsLabel(terms)}</>}.
           </p>
         </>
       )}

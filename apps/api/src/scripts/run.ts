@@ -11,7 +11,7 @@ import { createServices, type Services } from '../services/index.ts';
  */
 export async function runScript(task: (services: Services, ctx: AppContext) => Promise<void>) {
   const config = loadConfig();
-  const { db, close } = createDb(config.databaseUrl);
+  const { db, close } = createDb(config.databaseUrl, { max: 2 });
   const ctx: AppContext = {
     db,
     config,

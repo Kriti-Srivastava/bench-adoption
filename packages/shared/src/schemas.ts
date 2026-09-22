@@ -12,10 +12,11 @@ export const id = z.uuid();
 
 export const email = z.string().trim().toLowerCase().pipe(z.email());
 
-/** Adoption terms are whole months within this range. */
-export const ADOPTION_TERM_MONTHS = { min: 1, max: 60 } as const;
-/** Terms offered as quick choices in the UI (any value in range is accepted). */
-export const SUGGESTED_TERMS_MONTHS = [6, 12, 24, 36] as const;
+/**
+ * Outer bounds for any adoption term, in months. Each park then offers its
+ * own specific terms (`Park.adoptionTermsMonths`); Van Cortlandt: 10 years.
+ */
+export const ADOPTION_TERM_MONTHS = { min: 1, max: 120 } as const;
 
 export const termMonths = z
   .number()
@@ -79,6 +80,8 @@ export const park = z.object({
   slug: z.string(),
   name: z.string(),
   timezone: z.string(),
+  /** The adoption lengths this park offers, in months. */
+  adoptionTermsMonths: z.array(z.number().int()),
   areas: z.array(area),
   trails: z.array(trail),
 });

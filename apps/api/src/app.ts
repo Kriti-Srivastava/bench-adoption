@@ -1,5 +1,6 @@
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import { Redis } from 'ioredis';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyError, type FastifyServerOptions } from 'fastify';
@@ -28,7 +29,11 @@ export async function buildApp(
   deps: Omit<AppContext, 'log'>,
   opts: { logger?: FastifyServerOptions['logger'] } = {},
 ) {
-  const app = Fastify({ logger: opts.logger ?? false }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    // Behind a load balancer, read the client's address from X-Forwarded-For.
+    trustProxy: (_address: string, hop: number) => hop < deps.config.trustProxyHops,
+  }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
@@ -36,8 +41,14 @@ export async function buildApp(
   const services = createServices(ctx);
 
   await app.register(cookie);
+  // In-memory limits are per instance; with REDIS_URL all instances share one count.
+  const redis = deps.config.redisUrl
+    ? new Redis(deps.config.redisUrl, { connectTimeout: 500, maxRetriesPerRequest: 1 })
+    : undefined;
+  if (redis) app.addHook('onClose', async () => void (await redis.quit()));
   await app.register(rateLimit, {
     global: false,
+    redis,
     errorResponseBuilder: (_req, context) => ({
       statusCode: 429,
       code: 'rate_limited',

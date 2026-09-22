@@ -41,13 +41,30 @@ export const maintenancePriorityEnum = pgEnum('maintenance_priority', maintenanc
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
-export const parks = pgTable('parks', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  slug: text('slug').notNull().unique(),
-  name: text('name').notNull(),
-  timezone: text('timezone').notNull().default('America/New_York'),
-  createdAt: createdAt(),
-});
+export const parks = pgTable(
+  'parks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    name: text('name').notNull(),
+    timezone: text('timezone').notNull().default('America/New_York'),
+    /**
+     * Adoption lengths this park offers, in months. Van Cortlandt Park
+     * Alliance adopts benches for a fixed 10-year term.
+     */
+    adoptionTermsMonths: integer('adoption_terms_months')
+      .array()
+      .notNull()
+      .default(sql`'{120}'::integer[]`),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      'parks_adoption_terms_valid',
+      sql`cardinality(${t.adoptionTermsMonths}) >= 1 and 1 <= all(${t.adoptionTermsMonths}) and 120 >= all(${t.adoptionTermsMonths})`,
+    ),
+  ],
+);
 
 /** Nature and history notes shown to visitors; any number per area or trail. */
 const facts = () =>
@@ -201,15 +218,20 @@ export const adoptions = pgTable(
 );
 
 /** Single-use sign-in links. Only a hash of the token is stored. */
-export const authTokens = pgTable('auth_tokens', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  tokenHash: text('token_hash').notNull().unique(),
-  email: text('email').notNull(),
-  redirectTo: text('redirect_to'),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  usedAt: timestamp('used_at', { withTimezone: true }),
-  createdAt: createdAt(),
-});
+export const authTokens = pgTable(
+  'auth_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tokenHash: text('token_hash').notNull().unique(),
+    email: text('email').notNull(),
+    redirectTo: text('redirect_to'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  // Per-address rate limiting counts recent links for an email.
+  (t) => [index('auth_tokens_email_created_idx').on(t.email, t.createdAt)],
+);
 
 /** Browser sessions. The cookie holds a random token; only its hash is stored. */
 export const sessions = pgTable(

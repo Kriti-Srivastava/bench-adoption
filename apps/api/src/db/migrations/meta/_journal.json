@@ -43,6 +43,13 @@
       "when": 1790082008742,
       "tag": "0005_maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790093764695,
+      "tag": "0006_terms_and_signin_limits",
+      "breakpoints": true
     }
   ]
 }

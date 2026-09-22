@@ -68,7 +68,7 @@ export function createMaintenanceService(ctx: AppContext) {
   const { db } = ctx;
 
   async function requireBench(benchId: string) {
-    const found = await benchRepo.findBenchWithTimezone(db, benchId);
+    const found = await benchRepo.findBenchWithParkRules(db, benchId);
     if (!found) throw notFound('Bench');
     return found.bench;
   }

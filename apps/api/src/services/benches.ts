@@ -76,6 +76,7 @@ export function createBenchService(ctx: AppContext) {
         slug: park.slug,
         name: park.name,
         timezone: park.timezone,
+        adoptionTermsMonths: park.adoptionTermsMonths,
         areas: areaRows.map((a) => ({ name: a.name, description: a.description, facts: a.facts })),
         trails: trailRows.map((t) => ({
           slug: t.slug,
@@ -140,7 +141,7 @@ export function createBenchService(ctx: AppContext) {
     },
 
     async updateBench(id: string, input: UpdateBenchInput): Promise<BenchSummary> {
-      const found = await benchRepo.findBenchWithTimezone(db, id);
+      const found = await benchRepo.findBenchWithParkRules(db, id);
       if (!found) throw notFound('Bench');
       const { zone, trails, ...values } = input;
       await saveBench(() =>

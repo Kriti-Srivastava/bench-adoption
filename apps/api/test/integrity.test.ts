@@ -170,14 +170,14 @@ describe('daily job', () => {
     expect(await t.services.reminders.sendDueReminders()).toBe(0);
   });
 
-  it('removes used and expired sign-in links and expired sessions, keeping live ones', async () => {
+  it('removes day-old sign-in links and expired sessions, keeping recent ones', async () => {
     await signIn(t, 'old@example.org'); // used link + session
     await t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload: { email: 'new@example.org' } });
 
-    // Nothing has expired yet: only the used link goes.
-    expect(await t.services.auth.purgeExpired()).toEqual({ tokens: 1, sessions: 0 });
+    // Recent links are kept: the per-address rate limit counts them.
+    expect(await t.services.auth.purgeExpired()).toEqual({ tokens: 0, sessions: 0 });
 
-    t.clock.set('2026-12-01'); // past the link's 15 minutes and the session's 30 days
-    expect(await t.services.auth.purgeExpired()).toEqual({ tokens: 1, sessions: 1 });
+    t.clock.set('2026-12-01'); // a day past the links, and past the session's 30 days
+    expect(await t.services.auth.purgeExpired()).toEqual({ tokens: 2, sessions: 1 });
   });
 });

@@ -23,5 +23,3 @@ export function daysLeftLabel(n: number): string {
   return `${Math.round(n / 30)} months left`;
 }
 
-export const pluralMonths = (n: number) =>
-  n % 12 === 0 ? `${n / 12} year${n === 12 ? '' : 's'}` : `${n} month${n === 1 ? '' : 's'}`;

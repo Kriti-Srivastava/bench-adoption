@@ -17,6 +17,9 @@ export function createTestClock(start: string) {
   let current = new Date(start);
   return {
     now: () => current,
+    advance(ms: number) {
+      current = new Date(current.getTime() + ms);
+    },
     /** Noon in New York on the given date, so "today" is unambiguous. */
     set(date: string) {
       current = new Date(`${date}T16:00:00Z`);
@@ -55,6 +58,8 @@ export async function resetData({ db, mailer }: TestApp) {
     slug: PARK,
     name: 'Test Park',
     timezone: 'America/New_York',
+    // Short terms keep expiry and reminder tests readable.
+    adoptionTermsMonths: [1, 12, 24],
   });
   await parkRepo.upsertArea(db, {
     parkId: park.id,

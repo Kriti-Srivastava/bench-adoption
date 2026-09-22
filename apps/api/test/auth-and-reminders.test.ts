@@ -53,6 +53,35 @@ describe('magic-link sign in', () => {
     expect((await verify(lastToken())).json().error.code).toBe('invalid_link');
   });
 
+  it('sends at most one link a minute to the same address', async () => {
+    expect((await requestLink({ email: 'a@example.org' })).statusCode).toBe(204);
+    const again = await requestLink({ email: 'a@example.org' });
+    expect(again.statusCode).toBe(429);
+    expect(again.json().error.code).toBe('too_many_requests');
+    // Other addresses are unaffected.
+    expect((await requestLink({ email: 'b@example.org' })).statusCode).toBe(204);
+
+    t.clock.advance(61_000);
+    expect((await requestLink({ email: 'a@example.org' })).statusCode).toBe(204);
+  });
+
+  it('sends at most five links an hour to the same address', async () => {
+    for (let i = 0; i < 5; i++) {
+      expect((await requestLink({ email: 'a@example.org' })).statusCode).toBe(204);
+      t.clock.advance(2 * 60_000);
+    }
+    expect((await requestLink({ email: 'a@example.org' })).statusCode).toBe(429);
+    t.clock.advance(60 * 60_000);
+    expect((await requestLink({ email: 'a@example.org' })).statusCode).toBe(204);
+  });
+
+  it('counts concurrent requests correctly', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => requestLink({ email: 'burst@example.org' })),
+    );
+    expect(results.map((r) => r.statusCode).sort()).toEqual([204, 429, 429, 429, 429]);
+  });
+
   it('refuses redirects to other sites', async () => {
     const res = await requestLink({ email: 'a@example.org', redirectTo: '//evil.example' });
     expect(res.statusCode).toBe(400);
@@ -79,7 +108,7 @@ describe('magic-link sign in', () => {
 describe('renewal reminders', () => {
   async function adoptFor(months: number) {
     const { cookie } = await signIn(t, 'donor@example.org');
-    return (
+    const adoption = (
       await t.app.inject({
         method: 'POST',
         url: '/api/v1/adoptions',
@@ -87,6 +116,7 @@ describe('renewal reminders', () => {
         payload: { benchId: benches[0].id, months, displayName: 'Donor' },
       })
     ).json();
+    return { ...adoption, cookie };
   }
 
   const reminders = () => t.mailer.sent.filter((m) => m.subject.includes('ends in'));
@@ -124,11 +154,10 @@ describe('renewal reminders', () => {
 
   it('stops once the adoption is renewed', async () => {
     const first = await adoptFor(12);
-    const { cookie } = await signIn(t, 'donor@example.org');
     await t.app.inject({
       method: 'POST',
       url: `/api/v1/adoptions/${first.id}/renew`,
-      headers: { cookie },
+      headers: { cookie: first.cookie },
       payload: { months: 12 },
     });
     t.clock.set('2027-09-01');

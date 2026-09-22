@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { addMonths, SUGGESTED_TERMS_MONTHS, type Adoption, type Me } from '@bench/shared';
+import { addMonths, termLabel, type Adoption, type Me } from '@bench/shared';
 import { api } from '../api.ts';
 import { SignInForm } from '../components/SignInForm.tsx';
 import { StatusPill } from '../components/TaskEditor.tsx';
 import { ErrorNotice, Loadable, TermPicker } from '../components/ui.tsx';
-import { daysLeftLabel, formatDate, formatPeriod, pluralMonths } from '../format.ts';
+import { daysLeftLabel, formatDate, formatPeriod } from '../format.ts';
 import { TYPE_LABEL } from '../maintenance.ts';
-import { keys, useMe, useMyAdoptions } from '../queries.ts';
+import { keys, useMe, useMyAdoptions, usePark } from '../queries.ts';
 
 export function MyBenchesPage() {
   const me = useMe();
@@ -131,10 +131,13 @@ function AdoptionCard({ adoption: a, startOpen }: { adoption: Adoption; startOpe
 }
 
 function RenewForm({ adoption, onDone }: { adoption: Adoption; onDone: () => void }) {
-  const [months, setMonths] = useState(12);
+  const park = usePark(adoption.parkSlug);
+  const terms = park.data?.adoptionTermsMonths ?? [];
+  const [chosen, setMonths] = useState<number>();
+  const months = chosen ?? terms[0];
   const queryClient = useQueryClient();
   const renew = useMutation({
-    mutationFn: () => api.renew(adoption.id, months),
+    mutationFn: () => api.renew(adoption.id, months!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.myAdoptions });
       queryClient.invalidateQueries({ queryKey: keys.bench(adoption.parkSlug, adoption.benchCode) });
@@ -144,15 +147,21 @@ function RenewForm({ adoption, onDone }: { adoption: Adoption; onDone: () => voi
 
   return (
     <div className="stack" style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-      <strong>Renew for how long?</strong>
-      <TermPicker value={months} onChange={setMonths} options={SUGGESTED_TERMS_MONTHS} />
-      <p className="muted small">
-        Your renewal continues right after the current period: {formatDate(adoption.endDate)} until{' '}
-        {formatDate(addMonths(adoption.endDate, months))} ({pluralMonths(months)}).
-      </p>
+      <strong>Renew your adoption</strong>
+      {months === undefined ? (
+        <p className="muted small">Loading…</p>
+      ) : (
+        <>
+          <TermPicker value={months} onChange={setMonths} options={terms} />
+          <p className="muted small">
+            Your renewal continues right after the current period: {formatDate(adoption.endDate)} until{' '}
+            {formatDate(addMonths(adoption.endDate, months))} ({termLabel(months)}).
+          </p>
+        </>
+      )}
       <ErrorNotice error={renew.error} />
       <div className="row">
-        <button className="btn" disabled={renew.isPending} onClick={() => renew.mutate()}>
+        <button className="btn" disabled={renew.isPending || months === undefined} onClick={() => renew.mutate()}>
           {renew.isPending ? 'Renewing…' : 'Confirm renewal'}
         </button>
         <button className="btn secondary" onClick={onDone}>

@@ -71,6 +71,15 @@ Key design decisions:
 - **Passwordless sign-in.** Magic links are single-use, expire after 15
   minutes and are stored hashed, as are session tokens. The account is
   created on first sign-in, so there is no separate sign-up step.
+- **Sign-in rate limits, in two layers.** *Per address:* at most one link a
+  minute and five an hour to the same email. This is counted in Postgres
+  under a per-address advisory lock, so it holds across any number of API
+  instances and concurrent requests can't slip past it. *Per IP:* a short
+  burst limit. It is in memory by default, or shared across instances when
+  `REDIS_URL` is set. Set `TRUST_PROXY_HOPS` behind a load balancer.
+- **Contention is retried, not surfaced.** Postgres may abort one of several
+  simultaneous conflicting inserts as a deadlock. Those writes are retried,
+  so every loser of a race gets a clean `409`, never a `500`.
 - **Areas and trails are data.** Every bench is in one *area* (for example
   Van Cortlandt Lake). A bench can sit along any number of *trails*, which
   are linked through `bench_trails` because a bench at a junction is on
@@ -85,8 +94,10 @@ Key design decisions:
 1. **Discover.** Each bench page has a permanent URL,
    `/parks/van-cortlandt/benches/VC-042`, meant to be printed as a QR code on
    the plaque.
-2. **Adopt.** Choose a term (1–60 months), a display name and an optional
-   dedication. If not signed in, the visitor enters an email right there and
+2. **Adopt.** Van Cortlandt Park adopts benches for a fixed **10-year term**,
+   matching the Van Cortlandt Park Alliance's program. Terms are a per-park
+   setting (`parks.adoption_terms_months`), so another park can offer
+   different ones. Donors choose a display name and an optional dedication. If not signed in, the visitor enters an email right there and
    the link brings them back to the same form.
 3. **Confirm.** A confirmation email explains the period and how to renew.
 4. **Renew.** Run `npm run jobs:daily -w @bench/api` daily (cron, a

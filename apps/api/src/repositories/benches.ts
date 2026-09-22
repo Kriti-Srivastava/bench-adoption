@@ -107,13 +107,16 @@ export async function findBench(
   return row;
 }
 
-/** A bench together with its park's timezone, which defines "today" for it. */
-export async function findBenchWithTimezone(
+/**
+ * A bench with the park rules that govern it: the timezone that defines
+ * "today" there, and the adoption terms the park offers.
+ */
+export async function findBenchWithParkRules(
   db: Executor,
   benchId: string,
-): Promise<{ bench: BenchRow; timezone: string } | undefined> {
+): Promise<{ bench: BenchRow; timezone: string; adoptionTermsMonths: number[] } | undefined> {
   const [row] = await db
-    .select({ bench: benches, timezone: parks.timezone })
+    .select({ bench: benches, timezone: parks.timezone, adoptionTermsMonths: parks.adoptionTermsMonths })
     .from(benches)
     .innerJoin(parks, eq(parks.id, benches.parkId))
     .where(eq(benches.id, benchId));

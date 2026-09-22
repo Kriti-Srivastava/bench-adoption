@@ -1,0 +1,3 @@
+ALTER TABLE "parks" ADD COLUMN "adoption_terms_months" integer[] DEFAULT '{120}'::integer[] NOT NULL;--> statement-breakpoint
+CREATE INDEX "auth_tokens_email_created_idx" ON "auth_tokens" USING btree ("email","created_at");--> statement-breakpoint
+ALTER TABLE "parks" ADD CONSTRAINT "parks_adoption_terms_valid" CHECK (cardinality("parks"."adoption_terms_months") >= 1 and 1 <= all("parks"."adoption_terms_months") and 120 >= all("parks"."adoption_terms_months"));

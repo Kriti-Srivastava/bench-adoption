@@ -120,13 +120,14 @@ describe('adopting', () => {
     expect(res.json().error.code).toBe('bench_unavailable');
   });
 
-  it('lets exactly one of two simultaneous requests win', async () => {
+  it('lets exactly one of many simultaneous requests win, and turns the rest away cleanly', async () => {
     const people = await Promise.all(
-      Array.from({ length: 5 }, (_, i) => signIn(t, `racer${i}@example.org`)),
+      Array.from({ length: 8 }, (_, i) => signIn(t, `racer${i}@example.org`)),
     );
     const results = await Promise.all(people.map((p) => adopt(p.cookie, benches[1].id)));
     const codes = results.map((r) => r.statusCode).sort();
-    expect(codes).toEqual([201, 409, 409, 409, 409]);
+    // Never a 500: contention deadlocks are retried into a clean 409.
+    expect(codes).toEqual([201, 409, 409, 409, 409, 409, 409, 409]);
   });
 
   it('frees the bench once the adoption ends', async () => {
@@ -139,6 +140,18 @@ describe('adopting', () => {
 
     const other = await signIn(t, 'next@example.org');
     expect((await adopt(other.cookie, benches[0].id)).statusCode).toBe(201);
+  });
+
+  it("only accepts the park's own adoption terms", async () => {
+    const { cookie } = await signIn(t, 'donor@example.org');
+    const park = (await t.app.inject({ method: 'GET', url: `/api/v1/parks/${PARK}` })).json();
+    expect(park.adoptionTermsMonths).toEqual([1, 12, 24]);
+    const res = await adopt(cookie, benches[0].id, { months: 6 });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toEqual({
+      code: 'invalid_term',
+      message: 'This park offers adoptions of 1 month, 1 year or 2 years.',
+    });
   });
 
   it('validates the term length', async () => {

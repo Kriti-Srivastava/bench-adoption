@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import type { BenchSummary, Park } from '@bench/shared';
+import { termsLabel, type BenchSummary, type Park } from '@bench/shared';
 import { Loadable } from '../components/ui.tsx';
 import { DEFAULT_PARK } from '../format.ts';
 import { mapUrl } from '../mapFilters.ts';
@@ -47,8 +47,8 @@ export function HomePage() {
                 <span className="step-num">2</span>
                 <h3>Adopt it</h3>
                 <p className="muted">
-                  Choose how long (1 month to 5 years), add a name and an optional dedication.
-                  Just an email, no password needed.
+                  Adoptions last {termsLabel(p.adoptionTermsMonths)}. Add a name and an optional
+                  dedication for the plaque. Just an email, no password needed.
                 </p>
               </li>
               <li className="card">

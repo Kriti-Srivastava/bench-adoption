@@ -3,17 +3,17 @@ import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   addMonths,
-  ADOPTION_TERM_MONTHS,
-  SUGGESTED_TERMS_MONTHS,
+  termLabel,
   todayIn,
   type Adoption,
   type BenchDetail,
   type Me,
+  type Park,
 } from '@bench/shared';
 import { api } from '../api.ts';
 import { SignInForm } from '../components/SignInForm.tsx';
 import { ErrorNotice, Loadable, TermPicker } from '../components/ui.tsx';
-import { formatDate, pluralMonths } from '../format.ts';
+import { formatDate } from '../format.ts';
 import { keys, useBench, useMe, usePark } from '../queries.ts';
 
 export function AdoptPage() {
@@ -34,7 +34,7 @@ export function AdoptPage() {
           user ? (
             <Loadable query={bench}>
               {(b) =>
-                park.data && <AdoptFlow slug={slug} bench={b} user={user} timezone={park.data.timezone} />
+                park.data && <AdoptFlow slug={slug} bench={b} user={user} park={park.data} />
               }
             </Loadable>
           ) : (
@@ -63,16 +63,16 @@ function AdoptFlow({
   slug,
   bench,
   user,
-  timezone,
+  park,
 }: {
   slug: string;
   bench: BenchDetail;
   user: Me;
-  timezone: string;
+  park: Park;
 }) {
   const [step, setStep] = useState<'details' | 'review' | 'done'>('details');
   const [details, setDetails] = useState<Details>({
-    months: 12,
+    months: park.adoptionTermsMonths[0]!,
     fullName: user.fullName ?? '',
     displayName: user.fullName ?? '',
     dedication: '',
@@ -110,7 +110,7 @@ function AdoptFlow({
     );
   }
 
-  const today = todayIn(timezone);
+  const today = todayIn(park.timezone);
   const steps = ['Details', 'Review', 'Done'];
   const current = { details: 0, review: 1, done: 2 }[step];
 
@@ -128,6 +128,7 @@ function AdoptFlow({
         <DetailsForm
           details={details}
           askFullName={!user.fullName}
+          terms={park.adoptionTermsMonths}
           onChange={setDetails}
           onNext={() => setStep('review')}
         />
@@ -142,7 +143,7 @@ function AdoptFlow({
               {bench.code} · {bench.name}
             </dd>
             <dt>Length</dt>
-            <dd>{pluralMonths(details.months)}</dd>
+            <dd>{termLabel(details.months)}</dd>
             <dt>Period</dt>
             <dd>
               {formatDate(today)} until {formatDate(addMonths(today, details.months))}
@@ -195,11 +196,13 @@ function AdoptFlow({
 function DetailsForm({
   details,
   askFullName,
+  terms,
   onChange,
   onNext,
 }: {
   details: Details;
   askFullName: boolean;
+  terms: number[];
   onChange: (d: Details) => void;
   onNext: () => void;
 }) {
@@ -213,22 +216,10 @@ function DetailsForm({
   return (
     <form className="card stack" onSubmit={submit}>
       <div>
-        <span id="term-label" className="label" style={{ fontWeight: 600 }}>
-          How long would you like to adopt it?
+        <span className="label" style={{ fontWeight: 600 }}>
+          Adoption length
         </span>
-        <TermPicker value={details.months} onChange={(m) => set('months', m)} options={SUGGESTED_TERMS_MONTHS} />
-        <p className="hint" style={{ marginTop: '0.5rem' }}>
-          Or enter any number of months:{' '}
-          <input
-            aria-labelledby="term-label"
-            type="number"
-            min={ADOPTION_TERM_MONTHS.min}
-            max={ADOPTION_TERM_MONTHS.max}
-            value={details.months}
-            onChange={(e) => set('months', Number(e.target.value))}
-            style={{ width: 90, display: 'inline-block' }}
-          />
-        </p>
+        <TermPicker value={details.months} onChange={(m) => set('months', m)} options={terms} />
       </div>
 
       {askFullName && (

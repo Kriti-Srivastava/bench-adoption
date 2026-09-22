@@ -47,6 +47,8 @@ await runScript(async (_services, { db, clock }) => {
     slug: 'van-cortlandt',
     name: 'Van Cortlandt Park',
     timezone: 'America/New_York',
+    // Van Cortlandt Park Alliance: benches are adopted for a term of 10 years.
+    adoptionTermsMonths: [120],
   });
 
   await db.transaction(async (tx) => {

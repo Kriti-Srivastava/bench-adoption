@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { BenchAvailability } from '@bench/shared';
+import { termLabel, type BenchAvailability } from '@bench/shared';
 import { ApiError } from '../api.ts';
 import { AVAILABILITY } from '../availability.ts';
 
@@ -36,6 +36,7 @@ export function Loadable<T>({
   return <>{children(query.data)}</>;
 }
 
+/** Choose among a park's adoption terms; a park with a single term just states it. */
 export function TermPicker({
   value,
   onChange,
@@ -45,7 +46,13 @@ export function TermPicker({
   onChange: (months: number) => void;
   options: readonly number[];
 }) {
-  const label = (m: number) => (m % 12 === 0 ? `${m / 12} yr` : `${m} mo`);
+  if (options.length === 1) {
+    return (
+      <p className="term-fixed">
+        Adoptions last <strong>{termLabel(options[0]!)}</strong>.
+      </p>
+    );
+  }
   return (
     <div className="chips" role="group" aria-label="Adoption length">
       {options.map((m) => (
@@ -56,7 +63,7 @@ export function TermPicker({
           aria-pressed={value === m}
           onClick={() => onChange(m)}
         >
-          {label(m)}
+          {termLabel(m)}
         </button>
       ))}
     </div>

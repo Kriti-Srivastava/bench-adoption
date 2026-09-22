@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, ilike, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, ilike, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Role } from '@bench/shared';
 import { likeContains, type Executor } from '../db/client.ts';
 import { adoptions, authTokens, sessions, users } from '../db/schema.ts';
@@ -70,9 +70,26 @@ export async function updateUser(
 
 export async function insertAuthToken(
   db: Executor,
-  values: { tokenHash: string; email: string; redirectTo: string | null; expiresAt: Date },
+  values: { tokenHash: string; email: string; redirectTo: string | null; expiresAt: Date; createdAt: Date },
 ): Promise<void> {
   await db.insert(authTokens).values(values);
+}
+
+/**
+ * Serialises sign-in requests for one address across every API instance
+ * (a transaction-scoped Postgres advisory lock), so rate-limit checks can't race.
+ */
+export async function lockEmail(db: Executor, email: string): Promise<void> {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${email}, 0))`);
+}
+
+/** How many sign-in links were issued to an address since `since`, and when the latest was. */
+export async function recentAuthTokens(db: Executor, email: string, since: Date) {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int`, latest: sql<string | null>`max(${authTokens.createdAt})` })
+    .from(authTokens)
+    .where(and(eq(authTokens.email, email), gt(authTokens.createdAt, since)));
+  return { count: row?.count ?? 0, latest: row?.latest ? new Date(row.latest) : null };
 }
 
 /**
@@ -122,11 +139,16 @@ export async function deleteSession(db: Executor, tokenHash: string): Promise<vo
 
 // ---------------------------------------------------------------- housekeeping
 
-/** Deletes sign-in links and sessions that can no longer be used. */
+/**
+ * Deletes expired sessions, and sign-in links older than a day. Links are
+ * kept that long (well past their 15-minute life) because the per-address
+ * rate limit counts them.
+ */
 export async function purgeExpiredAuth(db: Executor, now: Date) {
+  const dayAgo = new Date(now.getTime() - 86_400_000);
   const tokens = await db
     .delete(authTokens)
-    .where(or(lt(authTokens.expiresAt, now), isNotNull(authTokens.usedAt)))
+    .where(lt(authTokens.createdAt, dayAgo))
     .returning({ id: authTokens.id });
   const expired = await db
     .delete(sessions)
