@@ -11,7 +11,9 @@ services:
     name: bench-api
     runtime: node
     plan: free
-    buildCommand: npm ci
+    # --include=dev: NODE_ENV=production is set for the build too, and the
+    # API is run with tsx, which lives in devDependencies.
+    buildCommand: npm ci --include=dev
     # Free plans have no release step, so migrations run before the server.
     startCommand: npm run db:migrate -w @bench/api && npm start -w @bench/api
     healthCheckPath: /api/health/ready
