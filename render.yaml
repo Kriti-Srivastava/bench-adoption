@@ -52,7 +52,7 @@ services:
       # Same-origin API: keeps the session cookie first-party.
       - type: rewrite
         source: /api/*
-        destination: https://bench-api.onrender.com/api/*
+        destination: https://bench-api-mp8e.onrender.com/api/*
       # Single-page app: every other path renders the site.
       - type: rewrite
         source: /*

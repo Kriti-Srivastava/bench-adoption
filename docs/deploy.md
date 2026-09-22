@@ -4,7 +4,7 @@ About 20 minutes. Three free accounts: **Neon** (database), **Render**
 (hosting) and **Resend** (email). You will end up with:
 
 - `https://bench-web.onrender.com` — the site
-- `https://bench-api.onrender.com` — the API (the site calls it through `/api`)
+- `https://bench-api-mp8e.onrender.com` — the API (the site calls it through `/api`)
 
 ## 1. Database: Neon
 
@@ -57,7 +57,7 @@ match your API's address.
 
 In GitHub: **Settings → Secrets and variables → Actions**, add
 
-- `API_URL` = `https://bench-api.onrender.com`
+- `API_URL` = `https://bench-api-mp8e.onrender.com`
 - `JOBS_TOKEN` = the same token as above
 
 The workflow in `.github/workflows/daily-job.yml` then runs every morning,
