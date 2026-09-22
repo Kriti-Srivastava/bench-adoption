@@ -11,7 +11,7 @@ import {
   type UpdateBenchInput,
   type BenchSummary,
 } from '@bench/shared';
-import { PG, pgErrorCode } from '../db/client.ts';
+import { PG, pgErrorCode, type Executor } from '../db/client.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as benchRepo from '../repositories/benches.ts';
 import * as parkRepo from '../repositories/parks.ts';
@@ -39,11 +39,53 @@ export function createBenchService(ctx: AppContext) {
     }
   }
 
+  /**
+   * Turns the area names and trail slugs used by the API into database ids,
+   * creating new areas on first use. Unknown trails are an error, since
+   * trails are curated rather than typed in freely.
+   */
+  async function resolvePlaces(
+    tx: Executor,
+    parkId: string,
+    rows: { zone?: string; trails?: string[] }[],
+  ) {
+    const areaIds = await parkRepo.ensureAreas(
+      tx,
+      parkId,
+      rows.flatMap((r) => (r.zone === undefined ? [] : [r.zone])),
+    );
+    const slugs = [...new Set(rows.flatMap((r) => r.trails ?? []))];
+    const trailIds = await parkRepo.trailIdsBySlug(tx, parkId, slugs);
+    const unknown = slugs.filter((s) => !trailIds.has(s));
+    if (unknown.length > 0) throw badRequest('unknown_trail', `Unknown trail: ${unknown.join(', ')}`);
+    return {
+      areaId: (name: string) => areaIds.get(name)!,
+      trailIds: (list: string[]) => list.map((s) => trailIds.get(s)!),
+    };
+  }
+
   return {
     async getPark(slug: string): Promise<Park> {
       const { park } = await requirePark(slug);
-      const zones = await parkRepo.listZones(db, park.id);
-      return { id: park.id, slug: park.slug, name: park.name, timezone: park.timezone, zones };
+      const [areaRows, trailRows] = await Promise.all([
+        parkRepo.listAreas(db, park.id),
+        parkRepo.listTrails(db, park.id),
+      ]);
+      return {
+        id: park.id,
+        slug: park.slug,
+        name: park.name,
+        timezone: park.timezone,
+        areas: areaRows.map((a) => ({ name: a.name, description: a.description, facts: a.facts })),
+        trails: trailRows.map((t) => ({
+          slug: t.slug,
+          name: t.name,
+          description: t.description,
+          lengthMiles: t.lengthMiles,
+          facts: t.facts,
+          path: t.path,
+        })),
+      };
     },
 
     async listBenches(slug: string, query: ListBenchesQuery & { limit: number }): Promise<BenchList> {
@@ -54,6 +96,7 @@ export function createBenchService(ctx: AppContext) {
         today,
         availability: query.availability,
         zone: query.zone,
+        trail: query.trail,
         q: query.q,
         afterCode: query.cursor,
         limit: query.limit + 1,
@@ -79,28 +122,49 @@ export function createBenchService(ctx: AppContext) {
     },
 
     async createBench(slug: string, input: CreateBenchInput): Promise<BenchSummary> {
-      const { park } = await requirePark(slug);
-      const values = createBenchInput.parse(input);
-      const bench = await saveBench(() => benchRepo.insertBench(db, { ...values, parkId: park.id }));
-      // A new bench is active and unadopted by definition.
-      return toBenchSummary({ bench, current: null, availability: 'available' });
+      const { park, today } = await requirePark(slug);
+      const { zone, trails, ...values } = createBenchInput.parse(input);
+      const id = await saveBench(() =>
+        db.transaction(async (tx) => {
+          const places = await resolvePlaces(tx, park.id, [{ zone, trails }]);
+          const bench = await benchRepo.insertBench(tx, {
+            ...values,
+            parkId: park.id,
+            areaId: places.areaId(zone),
+          });
+          if (trails) await parkRepo.setBenchTrails(tx, [{ benchId: bench.id, trailIds: places.trailIds(trails) }]);
+          return bench.id;
+        }),
+      );
+      return toBenchSummary((await benchRepo.findBench(db, { id }, today))!);
     },
 
     async updateBench(id: string, input: UpdateBenchInput): Promise<BenchSummary> {
-      const bench = await saveBench(() => benchRepo.updateBench(db, id, input));
-      if (!bench) throw notFound('Bench');
       const found = await benchRepo.findBenchWithTimezone(db, id);
-      const today = todayIn(found!.timezone, ctx.clock.now());
+      if (!found) throw notFound('Bench');
+      const { zone, trails, ...values } = input;
+      await saveBench(() =>
+        db.transaction(async (tx) => {
+          const places = await resolvePlaces(tx, found.bench.parkId, [{ zone, trails }]);
+          await benchRepo.updateBench(tx, id, {
+            ...values,
+            ...(zone === undefined ? {} : { areaId: places.areaId(zone) }),
+          });
+          if (trails) await parkRepo.setBenchTrails(tx, [{ benchId: id, trailIds: places.trailIds(trails) }]);
+        }),
+      );
+      const today = todayIn(found.timezone, ctx.clock.now());
       return toBenchSummary((await benchRepo.findBench(db, { id }, today))!);
     },
 
     /**
-     * Imports benches from CSV with columns code,name,zone,lat,lng[,description].
-     * Existing codes are updated, so the same file can be re-imported safely.
+     * Imports benches from CSV with columns code,name,zone,lat,lng and optional
+     * description and trails (trail slugs separated by ";"). Existing codes
+     * are updated, so the same file can be re-imported safely.
      */
     async importCsv(slug: string, csv: string): Promise<ImportBenchesResult> {
       const { park } = await requirePark(slug);
-      const records: Record<string, string>[] = parse(csv, {
+      const records: Record<string, string | undefined>[] = parse(csv, {
         columns: (header: string[]) => header.map((h) => h.trim().toLowerCase()),
         skip_empty_lines: true,
         trim: true,
@@ -114,6 +178,7 @@ export function createBenchService(ctx: AppContext) {
           lat: Number(r.lat),
           lng: Number(r.lng),
           description: r.description || null,
+          trails: r.trails?.split(';').map((t) => t.trim()).filter(Boolean),
         });
         if (!result.success) {
           const issue = result.error.issues[0]!;
@@ -132,7 +197,21 @@ export function createBenchService(ctx: AppContext) {
         codes.add(r.code);
       }
 
-      return db.transaction((tx) => benchRepo.upsertBenches(tx, park.id, rows));
+      return db.transaction(async (tx) => {
+        const places = await resolvePlaces(tx, park.id, rows);
+        const { created, updated, ids } = await benchRepo.upsertBenches(
+          tx,
+          park.id,
+          rows.map(({ zone, trails: _trails, ...r }) => ({ ...r, areaId: places.areaId(zone) })),
+        );
+        await parkRepo.setBenchTrails(
+          tx,
+          rows
+            .filter((r) => r.trails !== undefined)
+            .map((r) => ({ benchId: ids.get(r.code)!, trailIds: places.trailIds(r.trails!) })),
+        );
+        return { created, updated };
+      });
     },
   };
 }

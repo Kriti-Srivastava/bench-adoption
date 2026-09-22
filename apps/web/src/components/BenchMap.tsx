@@ -1,21 +1,23 @@
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useEffect, useMemo, useRef } from 'react';
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import { Link } from 'react-router-dom';
-import type { BenchSummary } from '@bench/shared';
+import type { BenchSummary, Park, Trail } from '@bench/shared';
 import { AVAILABILITY } from '../availability.ts';
 import { formatDate } from '../format.ts';
+import { natureNoteFor, trailsOf } from '../nature.ts';
 import { StatusBadge } from './ui.tsx';
 
 /** Zoom level used when focusing on a single bench. */
 const BENCH_ZOOM = 18;
+const PADDING: L.PointTuple = [24, 24];
 
 type Bounds = [[number, number], [number, number]];
 
-function boundsOf(benches: BenchSummary[]): Bounds {
-  const lats = benches.map((b) => b.lat);
-  const lngs = benches.map((b) => b.lng);
+function boundsOf(points: [number, number][]): Bounds {
+  const lats = points.map((p) => p[0]);
+  const lngs = points.map((p) => p[1]);
   return [
     [Math.min(...lats), Math.min(...lngs)],
     [Math.max(...lats), Math.max(...lngs)],
@@ -23,26 +25,34 @@ function boundsOf(benches: BenchSummary[]): Bounds {
 }
 
 /**
- * Interactive bench map. Pins are colored by availability; clicking one zooms
- * in and opens its details. Passing `selectedId` (e.g. from a list) does the
- * same from outside the map.
+ * Interactive bench map. Pins are colored by availability and trails are
+ * drawn as lines. Clicking a pin zooms in and opens its details; clicking a
+ * trail selects it. `selectedId` / `selectedTrail` do the same from outside.
  */
 export function BenchMap({
-  parkSlug,
+  park,
   benches,
   selectedId = null,
   onSelect,
+  selectedTrail = null,
+  onSelectTrail,
   height,
 }: {
-  parkSlug: string;
+  park: Park;
   benches: BenchSummary[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
+  selectedTrail?: string | null;
+  onSelectTrail?: (slug: string) => void;
   height?: number;
 }) {
   const markers = useRef(new Map<string, L.CircleMarker>());
-  const bounds = useMemo(() => (benches.length ? boundsOf(benches) : null), [benches]);
+  const bounds = useMemo(
+    () => (benches.length ? boundsOf(benches.map((b) => [b.lat, b.lng])) : null),
+    [benches],
+  );
   const single = benches.length === 1;
+  const trail = park.trails.find((t) => t.slug === selectedTrail);
 
   if (!bounds) return <div className="map notice">No benches match these filters.</div>;
 
@@ -50,8 +60,8 @@ export function BenchMap({
     <MapContainer
       className="map"
       style={height ? { height } : undefined}
-      bounds={bounds}
-      boundsOptions={{ padding: [24, 24], maxZoom: single ? BENCH_ZOOM : 17 }}
+      bounds={trail ? boundsOf(trail.path) : bounds}
+      boundsOptions={{ padding: PADDING, maxZoom: single ? BENCH_ZOOM : 17 }}
       maxZoom={19}
     >
       <TileLayer
@@ -59,6 +69,9 @@ export function BenchMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         maxZoom={19}
       />
+      {park.trails.map((t) => (
+        <TrailLine key={t.slug} trail={t} selected={t.slug === selectedTrail} onSelect={onSelectTrail} />
+      ))}
       {benches.map((b) => {
         const selected = b.id === selectedId;
         return (
@@ -78,16 +91,53 @@ export function BenchMap({
             }}
             eventHandlers={{ click: () => onSelect?.(b.id) }}
           >
-            <Popup minWidth={220} maxWidth={280}>
-              <BenchPopup parkSlug={parkSlug} bench={b} />
+            <Popup minWidth={240} maxWidth={300}>
+              <BenchPopup park={park} bench={b} />
             </Popup>
           </CircleMarker>
         );
       })}
       <FocusSelected benches={benches} selectedId={selectedId} markers={markers.current} />
+      <FitTrail trail={trail} />
       {!single && <ShowAllControl bounds={bounds} />}
     </MapContainer>
   );
+}
+
+function TrailLine({
+  trail,
+  selected,
+  onSelect,
+}: {
+  trail: Trail;
+  selected: boolean;
+  onSelect?: (slug: string) => void;
+}) {
+  return (
+    <Polyline
+      positions={trail.path}
+      pathOptions={
+        selected
+          ? { color: '#1d4ed8', weight: 6, opacity: 0.9 }
+          : { color: '#6b5a3a', weight: 3, opacity: 0.55, dashArray: '6 6' }
+      }
+      eventHandlers={{ click: () => onSelect?.(trail.slug) }}
+    >
+      <Tooltip sticky>{trail.name}</Tooltip>
+    </Polyline>
+  );
+}
+
+/** Zooms to a trail whenever a different one is selected. */
+function FitTrail({ trail }: { trail: Trail | undefined }) {
+  const map = useMap();
+  const slug = trail?.slug;
+  const latestTrail = useRef(trail);
+  latestTrail.current = trail;
+  useEffect(() => {
+    if (latestTrail.current) map.flyToBounds(boundsOf(latestTrail.current.path), { padding: PADDING, duration: 0.6 });
+  }, [slug, map]);
+  return null;
 }
 
 /** Flies to the selected bench and opens its popup. */
@@ -134,7 +184,7 @@ function ShowAllControl({ bounds }: { bounds: Bounds }) {
           className="map-control"
           title="Show all benches"
           aria-label="Show all benches"
-          onClick={() => map.flyToBounds(bounds, { padding: [24, 24], duration: 0.6 })}
+          onClick={() => map.flyToBounds(bounds, { padding: PADDING, duration: 0.6 })}
         >
           ⤢
         </button>
@@ -143,9 +193,11 @@ function ShowAllControl({ bounds }: { bounds: Bounds }) {
   );
 }
 
-function BenchPopup({ parkSlug, bench: b }: { parkSlug: string; bench: BenchSummary }) {
+function BenchPopup({ park, bench: b }: { park: Park; bench: BenchSummary }) {
   const a = b.currentAdoption;
-  const benchUrl = `/parks/${parkSlug}/benches/${b.code}`;
+  const benchUrl = `/parks/${park.slug}/benches/${b.code}`;
+  const note = natureNoteFor(park, b);
+  const trails = trailsOf(park, b);
   return (
     <div className="bench-popup">
       <div className="bench-popup-head">
@@ -154,6 +206,7 @@ function BenchPopup({ parkSlug, bench: b }: { parkSlug: string; bench: BenchSumm
       </div>
       <div className="muted small">
         {b.name} · {b.zone}
+        {trails.length > 0 && <> · on {trails.map((t) => t.name).join(', ')}</>}
       </div>
 
       {a && (
@@ -173,6 +226,13 @@ function BenchPopup({ parkSlug, bench: b }: { parkSlug: string; bench: BenchSumm
         {b.availability === 'ending_soon' && a && `Becomes available on ${formatDate(a.endDate)}.`}
         {b.availability === 'retired' && 'No longer part of the adoption program.'}
       </p>
+
+      {note && (
+        <p className="nature-note small">
+          <span aria-hidden>🌿 </span>
+          <strong>Nature note:</strong> {note}
+        </p>
+      )}
 
       <div className="row">
         {b.availability === 'available' && (

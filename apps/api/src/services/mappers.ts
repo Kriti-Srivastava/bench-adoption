@@ -21,16 +21,18 @@ export function toPublicAdoption(a: AdoptionRow): PublicAdoption {
   };
 }
 
-export function toBenchSummary({ bench, current, availability }: BenchWithCurrentAdoption): BenchSummary {
+export function toBenchSummary(row: BenchWithCurrentAdoption): BenchSummary {
+  const { bench, current } = row;
   return {
     id: bench.id,
     code: bench.code,
     name: bench.name,
-    zone: bench.zone,
+    zone: row.areaName,
     lat: bench.lat,
     lng: bench.lng,
     status: bench.status,
-    availability,
+    availability: row.availability,
+    trails: row.trailSlugs,
     currentAdoption: current ? toPublicAdoption(current) : null,
   };
 }

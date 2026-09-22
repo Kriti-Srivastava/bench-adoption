@@ -39,10 +39,15 @@ export async function createTestApp() {
 
 export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
 
-/** Empties every table and loads one park with three benches. */
+/**
+ * Empties every table and loads one park with two areas, one trail and
+ * three benches: T-001 and T-002 by the lake (both on the lake trail) and
+ * T-003 in the meadow.
+ */
 export async function resetData({ db, mailer }: TestApp) {
   await db.execute(sql`
-    truncate reminders_sent, adoptions, sessions, auth_tokens, users, benches, parks
+    truncate reminders_sent, adoptions, sessions, auth_tokens, users,
+             bench_trails, benches, trails, areas, parks
     restart identity cascade
   `);
   mailer.sent.length = 0;
@@ -51,19 +56,42 @@ export async function resetData({ db, mailer }: TestApp) {
     name: 'Test Park',
     timezone: 'America/New_York',
   });
+  await parkRepo.upsertArea(db, {
+    parkId: park.id,
+    name: 'Lake',
+    description: 'By the water.',
+    facts: ['Herons fish here.'],
+  });
+  const areaIds = await parkRepo.ensureAreas(db, park.id, ['Lake', 'Meadow']);
+  const trail = await parkRepo.upsertTrail(db, {
+    parkId: park.id,
+    slug: 'lake-loop',
+    name: 'Lake Loop',
+    description: null,
+    lengthMiles: 1,
+    facts: [],
+    path: [
+      [40.9, -73.89],
+      [40.901, -73.891],
+    ],
+  });
   const benches = [];
-  for (const [i, zone] of ['Lake', 'Lake', 'Meadow'].entries()) {
+  for (const [i, area] of ['Lake', 'Lake', 'Meadow'].entries()) {
     benches.push(
       await benchRepo.insertBench(db, {
         parkId: park.id,
         code: `T-00${i + 1}`,
         name: `Test bench ${i + 1}`,
-        zone,
+        areaId: areaIds.get(area)!,
         lat: 40.9,
         lng: -73.89,
       }),
     );
   }
+  await parkRepo.setBenchTrails(
+    db,
+    benches.slice(0, 2).map((b) => ({ benchId: b.id, trailIds: [trail.id] })),
+  );
   return { park, benches: benches as [(typeof benches)[0], (typeof benches)[0], (typeof benches)[0]] };
 }
 

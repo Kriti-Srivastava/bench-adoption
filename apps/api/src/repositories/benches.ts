@@ -1,8 +1,9 @@
 import { and, asc, eq, gt, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import { addDays, ENDING_SOON_DAYS, type BenchAvailability, type IsoDate } from '@bench/shared';
 import type { Executor } from '../db/client.ts';
-import { adoptions, benches, parks } from '../db/schema.ts';
+import { adoptions, areas, benchTrails, benches, parks, trails } from '../db/schema.ts';
 import { isRenewed } from './adoptions.ts';
+import { trailSlugsOf } from './parks.ts';
 
 export type BenchRow = typeof benches.$inferSelect;
 export type NewBench = typeof benches.$inferInsert;
@@ -12,6 +13,8 @@ export interface BenchWithCurrentAdoption {
   bench: BenchRow;
   current: AdoptionRow | null;
   availability: BenchAvailability;
+  areaName: string;
+  trailSlugs: string[];
 }
 
 /** Joins the (at most one, by constraint) active adoption covering `today`. */
@@ -40,8 +43,15 @@ function availabilitySql(today: IsoDate) {
 
 function selectBenches(db: Executor, today: IsoDate) {
   return db
-    .select({ bench: benches, current: adoptions, availability: availabilitySql(today) })
+    .select({
+      bench: benches,
+      current: adoptions,
+      availability: availabilitySql(today),
+      areaName: areas.name,
+      trailSlugs: trailSlugsOf(benches.id),
+    })
     .from(benches)
+    .innerJoin(areas, eq(areas.id, benches.areaId))
     .leftJoin(adoptions, currentAdoptionJoin(today));
 }
 
@@ -52,7 +62,10 @@ export interface ListBenchesFilter {
   parkId: string;
   today: IsoDate;
   availability?: BenchAvailability;
+  /** Area name. */
   zone?: string;
+  /** Trail slug. */
+  trail?: string;
   q?: string;
   /** Code of the last bench on the previous page. */
   afterCode?: string;
@@ -68,7 +81,11 @@ export async function listBenches(
       and(
         eq(benches.parkId, f.parkId),
         f.availability ? sql`${availabilitySql(f.today)} = ${f.availability}` : undefined,
-        f.zone ? eq(benches.zone, f.zone) : undefined,
+        f.zone ? eq(areas.name, f.zone) : undefined,
+        f.trail
+          ? sql`exists (select 1 from ${benchTrails} bt join ${trails} t on t.id = bt.trail_id
+                        where bt.bench_id = ${benches.id} and t.slug = ${f.trail})`
+          : undefined,
         f.q ? or(ilike(benches.code, contains(f.q)), ilike(benches.name, contains(f.q))) : undefined,
         f.afterCode ? gt(benches.code, f.afterCode) : undefined,
       ),
@@ -141,26 +158,31 @@ export async function upsertBenches(
   db: Executor,
   parkId: string,
   rows: Omit<NewBench, 'parkId'>[],
-): Promise<{ created: number; updated: number }> {
-  if (rows.length === 0) return { created: 0, updated: 0 };
+): Promise<{ created: number; updated: number; ids: Map<string, string> }> {
+  if (rows.length === 0) return { created: 0, updated: 0, ids: new Map() };
   const existing = await db
     .select({ code: benches.code })
     .from(benches)
     .where(and(eq(benches.parkId, parkId), inArray(benches.code, rows.map((r) => r.code))));
 
-  await db
+  const saved = await db
     .insert(benches)
     .values(rows.map((r) => ({ ...r, parkId })))
     .onConflictDoUpdate({
       target: [benches.parkId, benches.code],
       set: {
         name: sql`excluded.name`,
-        zone: sql`excluded.zone`,
+        areaId: sql`excluded.area_id`,
         description: sql`excluded.description`,
         lat: sql`excluded.lat`,
         lng: sql`excluded.lng`,
       },
-    });
+    })
+    .returning({ id: benches.id, code: benches.code });
 
-  return { created: rows.length - existing.length, updated: existing.length };
+  return {
+    created: rows.length - existing.length,
+    updated: existing.length,
+    ids: new Map(saved.map((r) => [r.code, r.id])),
+  };
 }

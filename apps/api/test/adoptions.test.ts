@@ -48,6 +48,25 @@ describe('browsing', () => {
     expect((await list('?q=bench%202')).items[0].code).toBe('T-002');
   });
 
+  it('describes the park with its areas, facts and trails', async () => {
+    const park = (await t.app.inject({ method: 'GET', url: `/api/v1/parks/${PARK}` })).json();
+    expect(park.areas).toEqual([
+      { name: 'Lake', description: 'By the water.', facts: ['Herons fish here.'] },
+      { name: 'Meadow', description: null, facts: [] },
+    ]);
+    expect(park.trails).toHaveLength(1);
+    expect(park.trails[0]).toMatchObject({ slug: 'lake-loop', name: 'Lake Loop', lengthMiles: 1 });
+    expect(park.trails[0].path).toHaveLength(2);
+  });
+
+  it('lists the benches along a trail', async () => {
+    const onTrail = await list('?trail=lake-loop');
+    expect(onTrail.items.map((b: { code: string }) => b.code)).toEqual(['T-001', 'T-002']);
+    expect(onTrail.items[0].trails).toEqual(['lake-loop']);
+    expect((await getBench('T-003')).trails).toEqual([]);
+    expect((await list('?trail=nowhere')).items).toHaveLength(0);
+  });
+
   it('returns 404 for an unknown bench', async () => {
     const res = await t.app.inject({ method: 'GET', url: `/api/v1/parks/${PARK}/benches/NOPE` });
     expect(res.statusCode).toBe(404);
@@ -284,6 +303,46 @@ describe('staff tools', () => {
     });
     expect(res.json()).toEqual({ created: 1, updated: 1 });
     expect((await getBench('T-001')).name).toBe('Renamed bench');
+  });
+
+  it('sets areas and trails when importing, creating new areas as needed', async () => {
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/parks/${PARK}/benches/import`,
+      headers: { cookie: staff.cookie },
+      payload: {
+        csv: 'code,name,zone,lat,lng,trails\nT-003,Moved bench,Hilltop,40.9,-73.89,lake-loop\nT-001,Bench 1,Lake,40.9,-73.89,',
+      },
+    });
+    expect(res.json()).toEqual({ created: 0, updated: 2 });
+    const moved = await getBench('T-003');
+    expect(moved).toMatchObject({ zone: 'Hilltop', trails: ['lake-loop'] });
+    expect((await getBench('T-001')).trails).toEqual([]);
+  });
+
+  it('rejects unknown trails', async () => {
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/parks/${PARK}/benches`,
+      headers: { cookie: staff.cookie },
+      payload: { code: 'T-900', name: 'New', zone: 'Lake', lat: 40.9, lng: -73.89, trails: ['nope'] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('unknown_trail');
+  });
+
+  it('adds a bench on a trail', async () => {
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/parks/${PARK}/benches`,
+      headers: { cookie: staff.cookie },
+      payload: { code: 'T-900', name: 'New', zone: 'Lake', lat: 40.9, lng: -73.89, trails: ['lake-loop'] },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ zone: 'Lake', trails: ['lake-loop'], availability: 'available' });
   });
 
   it('rejects a CSV with a bad row, naming the row', async () => {

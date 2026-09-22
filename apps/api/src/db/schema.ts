@@ -17,9 +17,11 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -41,6 +43,45 @@ export const parks = pgTable('parks', {
   createdAt: createdAt(),
 });
 
+/** Nature and history notes shown to visitors; any number per area or trail. */
+const facts = () =>
+  text('facts')
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`);
+
+/** A named part of a park (e.g. "Van Cortlandt Lake"). Every bench is in one. */
+export const areas = pgTable(
+  'areas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    parkId: uuid('park_id').notNull().references(() => parks.id),
+    name: text('name').notNull(),
+    description: text('description'),
+    facts: facts(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('areas_park_name_unique').on(t.parkId, t.name)],
+);
+
+/** A walking trail. Benches along it are linked through `bench_trails`. */
+export const trails = pgTable(
+  'trails',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    parkId: uuid('park_id').notNull().references(() => parks.id),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    lengthMiles: real('length_miles'),
+    facts: facts(),
+    /** The route as [lat, lng] points, in walking order. */
+    path: jsonb('path').$type<[number, number][]>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('trails_park_slug_unique').on(t.parkId, t.slug)],
+);
+
 export const benches = pgTable(
   'benches',
   {
@@ -49,14 +90,33 @@ export const benches = pgTable(
     /** The number on the bench plaque; unique within a park. */
     code: text('code').notNull(),
     name: text('name').notNull(),
-    zone: text('zone').notNull(),
+    areaId: uuid('area_id')
+      .notNull()
+      .references(() => areas.id),
     description: text('description'),
     lat: doublePrecision('lat').notNull(),
     lng: doublePrecision('lng').notNull(),
     status: benchStatusEnum('status').notNull().default('active'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('benches_park_code_unique').on(t.parkId, t.code)],
+  (t) => [
+    uniqueIndex('benches_park_code_unique').on(t.parkId, t.code),
+    index('benches_area_idx').on(t.areaId),
+  ],
+);
+
+/** Which benches sit along which trails (a bench at a junction can be on several). */
+export const benchTrails = pgTable(
+  'bench_trails',
+  {
+    benchId: uuid('bench_id')
+      .notNull()
+      .references(() => benches.id, { onDelete: 'cascade' }),
+    trailId: uuid('trail_id')
+      .notNull()
+      .references(() => trails.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.benchId, t.trailId] }), index('bench_trails_trail_idx').on(t.trailId)],
 );
 
 export const users = pgTable('users', {

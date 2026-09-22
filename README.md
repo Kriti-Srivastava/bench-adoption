@@ -71,6 +71,12 @@ Key design decisions:
 - **Passwordless sign-in.** Magic links are single-use, expire after 15
   minutes and are stored hashed, as are session tokens. The account is
   created on first sign-in, so there is no separate sign-up step.
+- **Areas and trails are data.** Every bench is in one *area* (for example
+  Van Cortlandt Lake). A bench can sit along any number of *trails*, which
+  are linked through `bench_trails` because a bench at a junction is on
+  several. Areas and trails carry descriptions and nature and history
+  *facts*. Bench popups show one fact from the bench's area, and neighbouring
+  benches show different ones.
 - **Multi-park from day one.** Benches belong to a `park`, and each park has
   its own timezone. Adding another park is data, not code.
 
@@ -94,7 +100,9 @@ bulk-import the park's existing spreadsheet:
 
 ```sh
 npm run import-benches -w @bench/api -- van-cortlandt benches.csv
-# columns: code,name,zone,lat,lng[,description]; re-importing updates by code
+# columns: code,name,zone,lat,lng[,description][,trails]
+# zone = area name (created if new); trails = trail slugs separated by ";"
+# re-importing updates by code
 ```
 
 ## API overview
@@ -102,7 +110,7 @@ npm run import-benches -w @bench/api -- van-cortlandt benches.csv
 | Method | Path | Who |
 |---|---|---|
 | GET | `/api/v1/parks/:slug` | public |
-| GET | `/api/v1/parks/:slug/benches?availability=&zone=&q=&cursor=&limit=` | public |
+| GET | `/api/v1/parks/:slug/benches?availability=&zone=&trail=&q=&cursor=&limit=` | public |
 | GET | `/api/v1/parks/:slug/benches/:code` | public |
 | POST | `/api/v1/auth/magic-link`, `/auth/verify`, `/auth/logout` | anyone |
 | GET/PATCH | `/api/v1/me` | signed in |
@@ -128,6 +136,14 @@ at `/api/docs`.
   from a CDN on the same domain as the API, routing `/api/*` to the API so the
   session cookie stays first-party.
 - **Reminders:** schedule `npm run jobs:reminders -w @bench/api` daily.
+
+## Sample content
+
+`apps/api/src/scripts/seed-data.ts` holds the park's areas, trails and facts.
+Trail routes and bench positions are approximate, and the facts were drafted
+from general knowledge of the park. **Have park staff or naturalists review
+them before launch.** Photos of each area could be added the same way once
+the park has images it is licensed to use.
 
 ## Extending
 

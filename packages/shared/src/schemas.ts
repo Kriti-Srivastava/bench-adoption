@@ -52,12 +52,35 @@ export type ErrorResponse = z.infer<typeof errorResponse>;
 
 // ---------------------------------------------------------------- parks
 
+/** A named part of a park. Every bench is in exactly one. */
+export const area = z.object({
+  name: z.string(),
+  description: z.string().nullable(),
+  /** Nature and history notes about the area, shown on bench popups. */
+  facts: z.array(z.string()),
+});
+export type Area = z.infer<typeof area>;
+
+export const latLng = z.tuple([z.number(), z.number()]);
+
+export const trail = z.object({
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  lengthMiles: z.number().nullable(),
+  facts: z.array(z.string()),
+  /** The route as [lat, lng] points, in walking order. */
+  path: z.array(latLng),
+});
+export type Trail = z.infer<typeof trail>;
+
 export const park = z.object({
   id,
   slug: z.string(),
   name: z.string(),
   timezone: z.string(),
-  zones: z.array(z.string()),
+  areas: z.array(area),
+  trails: z.array(trail),
 });
 export type Park = z.infer<typeof park>;
 
@@ -81,6 +104,8 @@ export const benchSummary = z.object({
   lng: z.number(),
   status: benchStatus,
   availability,
+  /** Slugs of the trails this bench sits along. */
+  trails: z.array(z.string()),
   currentAdoption: publicAdoption.nullable(),
 });
 export type BenchSummary = z.infer<typeof benchSummary>;
@@ -95,6 +120,8 @@ export type BenchDetail = z.infer<typeof benchDetail>;
 export const listBenchesQuery = z.object({
   availability: availability.optional(),
   zone: z.string().optional(),
+  /** Only benches along this trail (slug). */
+  trail: z.string().optional(),
   q: z.string().trim().min(1).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(100),
@@ -115,6 +142,8 @@ const benchFields = {
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   description: z.string().trim().max(1000).nullable().default(null),
+  /** Trail slugs; omit to leave a bench's trails unchanged on update/import. */
+  trails: z.array(z.string()).optional(),
 };
 
 export const createBenchInput = z.object(benchFields);

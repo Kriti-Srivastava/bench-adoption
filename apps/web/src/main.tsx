@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { ApiError } from './api.ts';
 import { Layout } from './components/Layout.tsx';
-import { DEFAULT_PARK } from './format.ts';
 import { AdoptPage } from './pages/AdoptPage.tsx';
 import { BenchPage } from './pages/BenchPage.tsx';
 import { ExplorePage } from './pages/ExplorePage.tsx';
+import { HomePage } from './pages/HomePage.tsx';
 import { MyBenchesPage } from './pages/MyBenchesPage.tsx';
 import { NotFoundPage } from './pages/NotFoundPage.tsx';
 import { SignInPage } from './pages/SignInPage.tsx';
@@ -29,7 +29,7 @@ const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
-      { path: '/', element: <Navigate to={`/parks/${DEFAULT_PARK}`} replace /> },
+      { path: '/', element: <HomePage /> },
       // Bench URLs are printed on plaques as QR codes, so keep them stable.
       { path: '/parks/:slug', element: <ExplorePage /> },
       { path: '/parks/:slug/benches/:code', element: <BenchPage /> },

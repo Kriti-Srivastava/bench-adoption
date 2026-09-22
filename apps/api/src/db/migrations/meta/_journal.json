@@ -15,6 +15,20 @@
       "when": 1790047105560,
       "tag": "0001_adoption_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790050141388,
+      "tag": "0002_areas_and_trails",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790050173946,
+      "tag": "0003_bench_area_required",
+      "breakpoints": true
     }
   ]
 }

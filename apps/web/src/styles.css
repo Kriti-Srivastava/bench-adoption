@@ -190,11 +190,23 @@ textarea { min-height: 88px; resize: vertical; }
 .leaflet-popup-content p { margin: 0.5rem 0; }
 .leaflet-container a.btn { color: var(--brand-contrast); }
 .bench-popup .dl { margin-top: 0.5rem; }
-.bench-popup-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 1rem; }
+.bench-popup-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  font-size: 1rem; padding-right: 18px; /* room for the popup close button */
+}
 
 /* ------------------------------------------------------------------ detail */
-.two-col { display: grid; gap: 20px; }
-@media (min-width: 800px) { .two-col { grid-template-columns: 3fr 2fr; } }
+.bench-layout { display: grid; gap: 20px; }
+@media (min-width: 800px) {
+  .bench-layout {
+    grid-template-columns: 3fr 2fr;
+    grid-template-areas: 'map side' 'about side';
+    align-items: start;
+  }
+  .bench-layout-map { grid-area: map; }
+  .bench-layout-side { grid-area: side; }
+  .bench-layout-about { grid-area: about; }
+}
 .dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0; }
 .dl dt { color: var(--muted); }
 .dl dd { margin: 0; }
@@ -221,3 +233,65 @@ th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 .form-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
 @media (min-width: 640px) { .form-grid { grid-template-columns: 1fr 1fr; } .form-grid .full { grid-column: 1 / -1; } }
+
+/* ------------------------------------------------------------------ navigation */
+.skip-link {
+  position: absolute; left: -999px; top: 8px; z-index: 2000;
+  background: var(--surface); padding: 0.5rem 1rem; border-radius: 8px;
+}
+.skip-link:focus { left: 16px; }
+.nav a { color: var(--muted); padding: 0.35rem 0.1rem; border-bottom: 2px solid transparent; }
+.nav a:hover { color: var(--text); }
+.nav a.active { color: var(--text); font-weight: 600; border-bottom-color: var(--brand); }
+@media (max-width: 560px) {
+  .brand span { display: none; }
+  .nav { gap: 0.75rem; font-size: 0.9rem; }
+}
+.site-footer { border-top: 1px solid var(--border); padding: 20px 0 32px; }
+.site-footer nav { gap: 1rem; }
+.breadcrumbs { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; color: var(--muted); }
+
+/* ------------------------------------------------------------------ landing */
+.home { display: grid; gap: 40px; }
+.hero { padding: 24px 0 8px; max-width: 760px; }
+.hero h1 { font-size: clamp(2rem, 6vw, 3rem); margin-bottom: 0.75rem; }
+.eyebrow { color: var(--brand); font-weight: 600; margin-bottom: 0.5rem; }
+.lead { font-size: 1.15rem; color: var(--muted); max-width: 620px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+  margin: 28px 0 0; max-width: 620px;
+}
+.hero-stats dt { color: var(--muted); font-size: 0.85rem; }
+.hero-stats dd { margin: 0; font-size: 1.75rem; font-weight: 700; }
+@media (max-width: 560px) { .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.steps-grid {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.steps-grid h3 { margin-top: 0.5rem; }
+.steps-grid p { margin: 0; }
+.step-num {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--brand); color: var(--brand-contrast); font-weight: 700;
+}
+.trail-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.trail-tile { color: var(--text); text-decoration: none; display: flex; flex-direction: column; gap: 0.25rem; }
+.trail-tile:hover { border-color: var(--brand); }
+.trail-tile h3, .trail-tile p { margin: 0; }
+.tile-link { color: var(--brand); margin-top: auto; padding-top: 0.5rem; font-weight: 600; }
+a.chip { text-decoration: none; }
+.cta { text-align: center; display: grid; justify-items: center; gap: 0.5rem; }
+.cta p { margin: 0; }
+
+/* ------------------------------------------------------------------ map extras */
+.filters { display: grid; gap: 14px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.filter-row > div { flex: 1 1 180px; }
+.filter-row > .grow { flex: 2 1 240px; }
+.filter-row label { margin-bottom: 0.2rem; color: var(--muted); }
+.trail-card { border-left: 4px solid #1d4ed8; }
+.facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.4rem; }
+.nature-note {
+  background: var(--available-soft); border-radius: 8px; padding: 0.5rem 0.65rem;
+}
