@@ -11,7 +11,7 @@
     "db:seed": "tsx --env-file-if-exists=../../.env src/scripts/seed.ts",
     "make-admin": "tsx --env-file-if-exists=../../.env src/scripts/make-admin.ts",
     "import-benches": "tsx --env-file-if-exists=../../.env src/scripts/import-benches.ts",
-    "jobs:reminders": "tsx --env-file-if-exists=../../.env src/scripts/send-reminders.ts",
+    "jobs:daily": "tsx --env-file-if-exists=../../.env src/scripts/daily.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

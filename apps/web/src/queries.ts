@@ -8,7 +8,15 @@ export const keys = {
   bench: (slug: string, code: string) => ['bench', slug, code] as const,
   me: ['me'] as const,
   myAdoptions: ['my-adoptions'] as const,
-  staffAdoptions: (slug: string, q: object) => ['staff-adoptions', slug, q] as const,
+  staffAdoptions: (slug: string, q: object) => ['admin', 'adoptions', slug, q] as const,
+  // Everything under 'admin' is refreshed together after staff make changes.
+  admin: ['admin'] as const,
+  adminSummary: (slug: string) => ['admin', 'summary', slug] as const,
+  adminBenches: (slug: string) => ['admin', 'benches', slug] as const,
+  tasks: (slug: string, q: object) => ['admin', 'tasks', slug, q] as const,
+  benchTasks: (benchId: string) => ['admin', 'bench-tasks', benchId] as const,
+  users: (q: object) => ['admin', 'users', q] as const,
+  myReports: ['my-reports'] as const,
 };
 
 export const usePark = (slug: string) =>
@@ -24,3 +32,8 @@ export const useMe = () => useQuery({ queryKey: keys.me, queryFn: api.me, staleT
 
 export const useMyAdoptions = (enabled: boolean) =>
   useQuery({ queryKey: keys.myAdoptions, queryFn: api.myAdoptions, enabled });
+
+export const useIsStaff = () => {
+  const role = useMe().data?.role;
+  return { isStaff: role === 'staff' || role === 'admin', isAdmin: role === 'admin' };
+};

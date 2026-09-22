@@ -46,7 +46,7 @@ export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
  */
 export async function resetData({ db, mailer }: TestApp) {
   await db.execute(sql`
-    truncate reminders_sent, adoptions, sessions, auth_tokens, users,
+    truncate maintenance_tasks, reminders_sent, adoptions, sessions, auth_tokens, users,
              bench_trails, benches, trails, areas, parks
     restart identity cascade
   `);
@@ -90,6 +90,7 @@ export async function resetData({ db, mailer }: TestApp) {
   }
   await parkRepo.setBenchTrails(
     db,
+    park.id,
     benches.slice(0, 2).map((b) => ({ benchId: b.id, trailIds: [trail.id] })),
   );
   return { park, benches: benches as [(typeof benches)[0], (typeof benches)[0], (typeof benches)[0]] };

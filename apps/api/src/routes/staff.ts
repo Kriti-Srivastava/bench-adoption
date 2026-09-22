@@ -2,6 +2,16 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   adminAdoptionList,
+  adminBenchList,
+  adminSummary,
+  adminUserList,
+  adminUsersQuery,
+  createTaskInput,
+  maintenanceQuery,
+  maintenanceTask,
+  maintenanceTaskList,
+  retireBenchInput,
+  updateTaskInput,
   adminAdoptionsQuery,
   adoption,
   benchSummary,
@@ -13,7 +23,7 @@ import {
   setRoleInput,
   updateBenchInput,
 } from '@bench/shared';
-import { requireRole } from '../auth/session.ts';
+import { requireRole, requireUser } from '../auth/session.ts';
 import { toMe } from '../services/auth.ts';
 import type { Services } from '../services/index.ts';
 
@@ -82,6 +92,71 @@ export const staffRoutes =
         preHandler: requireRole('admin'),
         schema: { tags, body: setRoleInput, response: { 200: me } },
       },
-      async (req) => toMe(await services.auth.setRole(req.body.email, req.body.role)),
+      async (req) => toMe(await services.auth.setRole(req.body.email, req.body.role, requireUser(req))),
+    );
+
+    // ------------------------------------------------------------ admin overview
+
+    app.get(
+      '/parks/:slug/admin/summary',
+      { schema: { tags, params: parkParams, response: { 200: adminSummary } } },
+      async (req) => services.admin.summary(req.params.slug),
+    );
+
+    app.get(
+      '/parks/:slug/admin/benches',
+      { schema: { tags, params: parkParams, response: { 200: adminBenchList } } },
+      async (req) => ({ items: await services.admin.listBenches(req.params.slug) }),
+    );
+
+    app.get(
+      '/admin/users',
+      { schema: { tags, querystring: adminUsersQuery, response: { 200: adminUserList } } },
+      async (req) => ({ items: await services.admin.listUsers(req.query) }),
+    );
+
+    // ------------------------------------------------------------ bench lifecycle
+
+    const benchParams = z.object({ id });
+
+    app.post(
+      '/benches/:id/retire',
+      { schema: { tags, params: benchParams, body: retireBenchInput, response: { 200: benchSummary } } },
+      async (req) => services.admin.retire(requireUser(req), req.params.id, req.body),
+    );
+
+    app.post(
+      '/benches/:id/restore',
+      { schema: { tags, params: benchParams, response: { 200: benchSummary } } },
+      async (req) => services.admin.restore(requireUser(req), req.params.id),
+    );
+
+    // ------------------------------------------------------------ maintenance
+
+    app.get(
+      '/parks/:slug/maintenance',
+      { schema: { tags, params: parkParams, querystring: maintenanceQuery, response: { 200: maintenanceTaskList } } },
+      async (req) => ({ items: await services.maintenance.listForPark(req.params.slug, req.query) }),
+    );
+
+    app.get(
+      '/benches/:id/maintenance',
+      { schema: { tags, params: benchParams, response: { 200: maintenanceTaskList } } },
+      async (req) => ({ items: await services.maintenance.listForBench(req.params.id) }),
+    );
+
+    app.post(
+      '/benches/:id/maintenance',
+      { schema: { tags, params: benchParams, body: createTaskInput, response: { 201: maintenanceTask } } },
+      async (req, reply) => {
+        const task = await services.maintenance.create(requireUser(req), req.params.id, req.body);
+        return reply.code(201).send(task);
+      },
+    );
+
+    app.patch(
+      '/maintenance/:id',
+      { schema: { tags, params: z.object({ id }), body: updateTaskInput, response: { 200: maintenanceTask } } },
+      async (req) => services.maintenance.update(req.params.id, req.body),
     );
   };

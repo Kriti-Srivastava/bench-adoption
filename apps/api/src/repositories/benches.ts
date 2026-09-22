@@ -1,8 +1,9 @@
 import { and, asc, eq, gt, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import { addDays, ENDING_SOON_DAYS, type BenchAvailability, type IsoDate } from '@bench/shared';
-import type { Executor } from '../db/client.ts';
+import { likeContains, type Executor } from '../db/client.ts';
 import { adoptions, areas, benchTrails, benches, parks, trails } from '../db/schema.ts';
 import { isRenewed } from './adoptions.ts';
+import { lastDoneOn, openTaskCount } from './maintenance.ts';
 import { trailSlugsOf } from './parks.ts';
 
 export type BenchRow = typeof benches.$inferSelect;
@@ -41,22 +42,21 @@ function availabilitySql(today: IsoDate) {
   end`;
 }
 
+const benchFields = (today: IsoDate) => ({
+  bench: benches,
+  current: adoptions,
+  availability: availabilitySql(today),
+  areaName: areas.name,
+  trailSlugs: trailSlugsOf(benches.id),
+});
+
 function selectBenches(db: Executor, today: IsoDate) {
   return db
-    .select({
-      bench: benches,
-      current: adoptions,
-      availability: availabilitySql(today),
-      areaName: areas.name,
-      trailSlugs: trailSlugsOf(benches.id),
-    })
+    .select(benchFields(today))
     .from(benches)
     .innerJoin(areas, eq(areas.id, benches.areaId))
     .leftJoin(adoptions, currentAdoptionJoin(today));
 }
-
-/** LIKE pattern matching `text` literally anywhere in the value. */
-const contains = (text: string) => `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 
 export interface ListBenchesFilter {
   parkId: string;
@@ -86,7 +86,7 @@ export async function listBenches(
           ? sql`exists (select 1 from ${benchTrails} bt join ${trails} t on t.id = bt.trail_id
                         where bt.bench_id = ${benches.id} and t.slug = ${f.trail})`
           : undefined,
-        f.q ? or(ilike(benches.code, contains(f.q)), ilike(benches.name, contains(f.q))) : undefined,
+        f.q ? or(ilike(benches.code, likeContains(f.q)), ilike(benches.name, likeContains(f.q))) : undefined,
         f.afterCode ? gt(benches.code, f.afterCode) : undefined,
       ),
     )
@@ -185,4 +185,48 @@ export async function upsertBenches(
     updated: existing.length,
     ids: new Map(saved.map((r) => [r.code, r.id])),
   };
+}
+
+export interface AdminBenchRow extends BenchWithCurrentAdoption {
+  openTasks: number;
+  lastInspectedOn: string | null;
+  lastMaintainedOn: string | null;
+}
+
+/** Every bench in a park (retired included) with its upkeep status, for staff. */
+export async function listAdminBenches(
+  db: Executor,
+  f: { parkId: string; today: IsoDate; timezone: string },
+): Promise<AdminBenchRow[]> {
+  return db
+    .select({
+      ...benchFields(f.today),
+      openTasks: openTaskCount(benches.id),
+      lastInspectedOn: lastDoneOn(benches.id, f.timezone, 'inspection'),
+      lastMaintainedOn: lastDoneOn(benches.id, f.timezone),
+    })
+    .from(benches)
+    .innerJoin(areas, eq(areas.id, benches.areaId))
+    .leftJoin(adoptions, currentAdoptionJoin(f.today))
+    .where(eq(benches.parkId, f.parkId))
+    .orderBy(asc(benches.code));
+}
+
+/** Moves a bench's current and upcoming adoptions to another bench. Returns their ids. */
+export async function moveAdoptions(
+  db: Executor,
+  f: { fromBenchId: string; toBenchId: string; today: IsoDate },
+): Promise<string[]> {
+  const rows = await db
+    .update(adoptions)
+    .set({ benchId: f.toBenchId })
+    .where(
+      and(
+        eq(adoptions.benchId, f.fromBenchId),
+        eq(adoptions.status, 'active'),
+        gt(adoptions.endDate, f.today),
+      ),
+    )
+    .returning({ id: adoptions.id });
+  return rows.map((r) => r.id);
 }

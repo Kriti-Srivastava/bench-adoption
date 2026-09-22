@@ -33,6 +33,8 @@ export function createReminderService(ctx: AppContext) {
           includeEnded: false,
           endingOnOrBefore: addDays(today, furthest),
           onlyUnrenewed: true,
+          // A retired bench can't be renewed, so don't ask.
+          onlyActiveBenches: true,
         });
 
         for (const view of ending) {

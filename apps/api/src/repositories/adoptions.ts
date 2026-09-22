@@ -75,6 +75,8 @@ export interface ParkAdoptionsFilter {
   endingOnOrBefore?: IsoDate;
   /** Skip adoptions that already have a renewal lined up. */
   onlyUnrenewed?: boolean;
+  /** Skip benches that have been retired from the program. */
+  onlyActiveBenches?: boolean;
 }
 
 /** Active adoptions in a park, soonest-ending first. */
@@ -90,18 +92,29 @@ export async function listAdoptionViewsForPark(
         f.includeEnded ? undefined : gt(adoptions.endDate, f.today),
         f.endingOnOrBefore ? lte(adoptions.endDate, f.endingOnOrBefore) : undefined,
         f.onlyUnrenewed ? not(isRenewed) : undefined,
+        f.onlyActiveBenches ? eq(benches.status, 'active') : undefined,
       ),
     )
     .orderBy(asc(adoptions.endDate), asc(benches.code));
 }
 
-export async function cancelAdoption(db: Executor, id: string): Promise<AdoptionRow | undefined> {
-  const [row] = await db
-    .update(adoptions)
-    .set({ status: 'cancelled' })
-    .where(eq(adoptions.id, id))
-    .returning();
-  return row;
+/**
+ * Cancels an adoption together with any renewals that follow it, so a
+ * cancelled adoption never leaves a future renewal holding the bench.
+ * Returns the ids cancelled (empty if the adoption doesn't exist).
+ */
+export async function cancelAdoptionChain(db: Executor, id: string): Promise<string[]> {
+  const result = await db.execute<{ id: string }>(sql`
+    with recursive chain as (
+      select id from adoptions where id = ${id}
+      union all
+      select a.id from adoptions a join chain c on a.renewed_from_id = c.id
+    )
+    update adoptions set status = 'cancelled'
+    where id in (select id from chain)
+    returning id
+  `);
+  return result.rows.map((r) => r.id);
 }
 
 /**

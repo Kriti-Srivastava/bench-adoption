@@ -89,13 +89,36 @@ Key design decisions:
    dedication. If not signed in, the visitor enters an email right there and
    the link brings them back to the same form.
 3. **Confirm.** A confirmation email explains the period and how to renew.
-4. **Renew.** Run `npm run jobs:reminders -w @bench/api` daily (cron, a
+4. **Renew.** Run `npm run jobs:daily -w @bench/api` daily (cron, a
    scheduled container, etc.). It emails adopters 60, 30 and 7 days before
    their adoption ends, with a link that opens the renew form. Each reminder
    is recorded, so the job is safe to re-run. Failed sends are retried the next day.
 
-**Staff** (the `/parks/:slug/staff` dashboard) can list adoptions ending
-soon, export them as CSV, cancel adoptions, add or retire benches, and
+## Upkeep and the admin area
+
+The admin area (`/parks/:slug/admin`, for staff and admins) follows how park
+conservancies actually care for adopted benches: a yearly condition survey,
+repairs and repainting as needed, plaques fitted a few weeks after adoption,
+and plaques moved to a new bench if the old one has to go.
+
+- **Overview:** open and urgent tasks, benches due their yearly inspection,
+  plaques to install or move, and adoptions ending soon.
+- **Benches:** every bench with its last inspection and open tasks. Each
+  bench has a page with its maintenance history.
+- **Maintenance:** tasks (`maintenance_tasks`) for inspection, repair,
+  painting, cleaning, graffiti, plaques and relocation. Each has a status,
+  priority, assignee, scheduled date and notes. "Last inspected" is derived
+  from completed inspections, never stored. Every new adoption automatically
+  opens a *plaque* task.
+- **Retiring a bench** asks what happens to its adoption: *keep* it until it
+  ends, *end* it now, or *relocate* it (and its plaque) to an available bench.
+  The donor is emailed when their adoption changes, and the event is recorded
+  in the bench's history.
+- **Users:** search accounts. Admins change roles, but can't change their own.
+- **Visitors** can "Report a problem" on any bench page. Reports join the
+  crew's queue, and the reporter can follow them on **My account**.
+
+Staff can also export adoptions as CSV, cancel adoptions, add benches, and
 bulk-import the park's existing spreadsheet:
 
 ```sh
@@ -135,7 +158,7 @@ at `/api/docs`.
 - **Web:** `npm run build` produces static files in `apps/web/dist`. Serve them
   from a CDN on the same domain as the API, routing `/api/*` to the API so the
   session cookie stays first-party.
-- **Reminders:** schedule `npm run jobs:reminders -w @bench/api` daily.
+- **Daily job:** schedule `npm run jobs:daily -w @bench/api` (renewal reminders and clean-up of expired sign-in links and sessions).
 
 ## Sample content
 

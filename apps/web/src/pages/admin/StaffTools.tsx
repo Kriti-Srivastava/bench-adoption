@@ -1,45 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import type { CreateBenchInput } from '@bench/shared';
-import { api } from '../api.ts';
-import { ErrorNotice, Loadable } from '../components/ui.tsx';
-import { daysLeftLabel, formatPeriod } from '../format.ts';
-import { keys, useMe } from '../queries.ts';
+import { api } from '../../api.ts';
+import { ErrorNotice, Loadable } from '../../components/ui.tsx';
+import { daysLeftLabel, formatPeriod } from '../../format.ts';
+import { keys } from '../../queries.ts';
 
-type Tab = 'adoptions' | 'import' | 'add';
-
-export function StaffPage() {
-  const { slug = '' } = useParams();
-  const me = useMe();
-  const [tab, setTab] = useState<Tab>('adoptions');
-
-  if (me.isPending) return <p className="muted">Loading…</p>;
-  if (me.data?.role !== 'staff' && me.data?.role !== 'admin') {
-    return <p className="notice">This page is for park staff.</p>;
-  }
-
-  const tabs: [Tab, string][] = [
-    ['adoptions', 'Adoptions'],
-    ['import', 'Import benches'],
-    ['add', 'Add a bench'],
-  ];
-  return (
-    <div className="stack">
-      <h1>Staff dashboard</h1>
-      <div className="tabs" role="tablist">
-        {tabs.map(([id, label]) => (
-          <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {tab === 'adoptions' && <AdoptionsTab slug={slug} />}
-      {tab === 'import' && <ImportTab slug={slug} />}
-      {tab === 'add' && <AddBenchTab slug={slug} />}
-    </div>
-  );
-}
+/** Existing staff tools, shown as tabs of the admin area. */
 
 const WINDOWS = [
   { label: 'Ending in 30 days', days: 30 },
@@ -47,7 +15,7 @@ const WINDOWS = [
   { label: 'All current', days: undefined },
 ];
 
-function AdoptionsTab({ slug }: { slug: string }) {
+export function AdoptionsTab({ slug }: { slug: string }) {
   const [windowDays, setWindowDays] = useState<number | undefined>(30);
   const q = { expiringWithinDays: windowDays };
   const adoptions = useQuery({
@@ -58,7 +26,7 @@ function AdoptionsTab({ slug }: { slug: string }) {
   const cancel = useMutation({
     mutationFn: api.staff.cancel,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff-adoptions'] });
+      queryClient.invalidateQueries({ queryKey: keys.admin });
       queryClient.invalidateQueries({ queryKey: keys.benches(slug) });
     },
   });
@@ -136,7 +104,7 @@ function AdoptionsTab({ slug }: { slug: string }) {
   );
 }
 
-function ImportTab({ slug }: { slug: string }) {
+export function ImportTab({ slug }: { slug: string }) {
   const [file, setFile] = useState<File | null>(null);
   const queryClient = useQueryClient();
   const upload = useMutation({
@@ -144,6 +112,7 @@ function ImportTab({ slug }: { slug: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.benches(slug) });
       queryClient.invalidateQueries({ queryKey: keys.park(slug) });
+      queryClient.invalidateQueries({ queryKey: keys.admin });
     },
   });
 
@@ -175,7 +144,7 @@ function ImportTab({ slug }: { slug: string }) {
 
 const EMPTY_BENCH = { code: '', name: '', zone: '', lat: '', lng: '', description: '' };
 
-function AddBenchTab({ slug }: { slug: string }) {
+export function AddBenchTab({ slug }: { slug: string }) {
   const [form, setForm] = useState(EMPTY_BENCH);
   const queryClient = useQueryClient();
   const create = useMutation({
@@ -184,6 +153,7 @@ function AddBenchTab({ slug }: { slug: string }) {
       setForm(EMPTY_BENCH);
       queryClient.invalidateQueries({ queryKey: keys.benches(slug) });
       queryClient.invalidateQueries({ queryKey: keys.park(slug) });
+      queryClient.invalidateQueries({ queryKey: keys.admin });
     },
   });
 

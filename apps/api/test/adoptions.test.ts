@@ -151,10 +151,10 @@ describe('adopting', () => {
   it('refuses retired benches', async () => {
     const staff = await signIn(t, 'staff@example.org', 'staff');
     await t.app.inject({
-      method: 'PATCH',
-      url: `/api/v1/benches/${benches[2].id}`,
+      method: 'POST',
+      url: `/api/v1/benches/${benches[2].id}/retire`,
       headers: { cookie: staff.cookie },
-      payload: { status: 'retired' },
+      payload: { adoption: 'keep' },
     });
     const res = await adopt(staff.cookie, benches[2].id);
     expect(res.json().error.code).toBe('bench_retired');
@@ -169,10 +169,10 @@ describe('adopting', () => {
     await adopt(cookie, benches[0].id, { months: 12 });
     await adopt(cookie, benches[1].id, { months: 1 }); // ends in 30 days
     await t.app.inject({
-      method: 'PATCH',
-      url: `/api/v1/benches/${benches[2].id}`,
+      method: 'POST',
+      url: `/api/v1/benches/${benches[2].id}/retire`,
       headers: { cookie: staff.cookie },
-      payload: { status: 'retired' },
+      payload: { adoption: 'keep' },
     });
 
     const byCode = Object.fromEntries(

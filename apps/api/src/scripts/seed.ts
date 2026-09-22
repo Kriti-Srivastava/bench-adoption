@@ -8,9 +8,10 @@
  */
 import { count, eq } from 'drizzle-orm';
 import { addDays, addMonths, todayIn } from '@bench/shared';
-import { adoptions, benches } from '../db/schema.ts';
+import { adoptions, benches, maintenanceTasks } from '../db/schema.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as benchRepo from '../repositories/benches.ts';
+import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
 import { findOrCreateUser, updateUser } from '../repositories/users.ts';
 import { distanceToPath, nearest, pointsAlong } from './geo.ts';
@@ -107,6 +108,7 @@ await runScript(async (_services, { db, clock }) => {
 
     await parkRepo.setBenchTrails(
       tx,
+      park.id,
       rows.map((r) => ({
         benchId: result.ids.get(r.code)!,
         trailIds: TRAILS.filter((t) => distanceToPath([r.lat, r.lng], t.path) <= ON_TRAIL_METRES).map(
@@ -116,6 +118,9 @@ await runScript(async (_services, { db, clock }) => {
     );
     console.log(`Areas: ${AREAS.length}. Trails: ${TRAILS.length}.`);
   });
+
+  const today = todayIn(park.timezone, clock.now());
+  await seedMaintenance(park.id, today);
 
   const [{ existing } = { existing: 0 }] = await db
     .select({ existing: count() })
@@ -127,7 +132,6 @@ await runScript(async (_services, { db, clock }) => {
     return;
   }
 
-  const today = todayIn(park.timezone, clock.now());
   const parkBenches = await benchRepo.listBenches(db, { parkId: park.id, today, limit: 1000 });
   const donors = [];
   for (const d of DEMO_DONORS) {
@@ -156,4 +160,50 @@ await runScript(async (_services, { db, clock }) => {
     adopted++;
   }
   console.log(`Demo adoptions: ${adopted} created (some already ended).`);
+
+  /**
+   * A believable upkeep history: most benches inspected in the last year
+   * (the annual survey), plus a few open jobs of each kind for the crew.
+   */
+  async function seedMaintenance(parkId: string, today: string) {
+    const [{ tasks } = { tasks: 0 }] = await db
+      .select({ tasks: count() })
+      .from(maintenanceTasks)
+      .innerJoin(benches, eq(benches.id, maintenanceTasks.benchId))
+      .where(eq(benches.parkId, parkId));
+    if (tasks > 0) return console.log('Park already has maintenance history; skipping.');
+
+    const all = await benchRepo.listBenches(db, { parkId, today, limit: 1000 });
+    const active = all.filter((b) => b.bench.status === 'active').map((b) => b.bench);
+    let inspected = 0;
+    for (const bench of active) {
+      if (random() > 0.7) continue; // ~30% are due their survey
+      const daysAgo = Math.floor(random() * 330);
+      await taskRepo.insertTask(db, {
+        benchId: bench.id,
+        type: 'inspection',
+        title: 'Annual bench survey',
+        status: 'done',
+        completedAt: new Date(`${addDays(today, -daysAgo)}T15:00:00Z`),
+        resolution: random() > 0.85 ? 'Slats weathered; flagged for repainting.' : 'Good condition.',
+      });
+      inspected++;
+    }
+
+    const pick = () => active[Math.floor(random() * active.length)]!;
+    const open: Omit<taskRepo.NewTask, 'benchId'>[] = [
+      { type: 'repair', priority: 'urgent', title: 'Broken slat on seat', details: 'Reported by a runner; sharp edge.' },
+      { type: 'repair', priority: 'urgent', title: 'Bench wobbles: loose anchor bolt' },
+      { type: 'repair', title: 'Armrest cracked' },
+      { type: 'graffiti', title: 'Graffiti on back rest' },
+      { type: 'graffiti', priority: 'low', title: 'Marker tags on plaque side' },
+      { type: 'cleaning', title: 'Bird droppings and sap' },
+      { type: 'painting', status: 'scheduled', scheduledFor: addDays(today, 10), title: 'Repaint (volunteer day)' },
+      { type: 'painting', status: 'scheduled', scheduledFor: addDays(today, 10), title: 'Repaint (volunteer day)' },
+      { type: 'painting', status: 'scheduled', scheduledFor: addDays(today, 24), title: 'Repaint (volunteer day)' },
+      { type: 'plaque', priority: 'normal', title: 'Plaque loose: re-fix screws' },
+    ];
+    for (const task of open) await taskRepo.insertTask(db, { ...task, benchId: pick().id });
+    console.log(`Maintenance: ${inspected} past inspections, ${open.length} open jobs.`);
+  }
 });

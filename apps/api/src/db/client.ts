@@ -2,8 +2,14 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema.ts';
 
-export function createDb(databaseUrl: string) {
+export function createDb(
+  databaseUrl: string,
+  onError: (err: Error) => void = (err) => console.error('Postgres connection error', err),
+) {
   const pool = new pg.Pool({ connectionString: databaseUrl });
+  // An idle connection can drop (e.g. the database restarts). Without a
+  // listener, node treats that as fatal; the pool reconnects on next use.
+  pool.on('error', onError);
   const db = drizzle(pool, { schema });
   return { db, close: () => pool.end() };
 }
@@ -26,3 +32,6 @@ export const PG = {
   uniqueViolation: '23505',
   exclusionViolation: '23P01',
 } as const;
+
+/** LIKE/ILIKE pattern matching `text` literally anywhere in the value. */
+export const likeContains = (text: string) => `%${text.replace(/[\\%_]/g, '\\$&')}%`;

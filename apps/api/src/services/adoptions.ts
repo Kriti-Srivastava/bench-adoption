@@ -12,6 +12,7 @@ import { adoptionConfirmedEmail } from '../email/templates.ts';
 import { conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as benchRepo from '../repositories/benches.ts';
+import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
 import type { UserRow } from '../repositories/users.ts';
 import type { AppContext } from './context.ts';
@@ -87,6 +88,14 @@ export function createAdoptionService(ctx: AppContext) {
         displayName: input.displayName,
         dedication: input.dedication,
         isAnonymous: input.isAnonymous,
+      });
+      // Every new adoption needs its plaque made and fitted (typically 6-8 weeks).
+      await taskRepo.insertTask(db, {
+        benchId: bench.id,
+        type: 'plaque',
+        title: `Install plaque: ${input.isAnonymous ? 'anonymous donor' : input.displayName}`,
+        details: input.dedication,
+        adoptionId: adoption.id,
       });
       await confirm(user, adoption, false);
       return adoption;
@@ -164,10 +173,15 @@ export function createAdoptionService(ctx: AppContext) {
       );
     },
 
+    /** Cancels an adoption and any renewals that follow it. */
     async cancel(adoptionId: string): Promise<Adoption> {
-      const row = await adoptionRepo.cancelAdoption(db, adoptionId);
-      if (!row) throw notFound('Adoption');
-      return toAdoption((await adoptionRepo.findAdoptionView(db, row.id))!, ctx.clock.now());
+      const cancelled = await db.transaction(async (tx) => {
+        const ids = await adoptionRepo.cancelAdoptionChain(tx, adoptionId);
+        await taskRepo.cancelOpenTasksForAdoptions(tx, ids);
+        return ids;
+      });
+      if (cancelled.length === 0) throw notFound('Adoption');
+      return toAdoption((await adoptionRepo.findAdoptionView(db, adoptionId))!, ctx.clock.now());
     },
   };
 }

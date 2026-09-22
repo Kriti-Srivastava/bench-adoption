@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Me, Role } from '@bench/shared';
 import { magicLinkEmail } from '../email/templates.ts';
-import { AppError, notFound } from '../errors.ts';
+import { AppError, conflict, notFound } from '../errors.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
 import type { AppContext } from './context.ts';
@@ -71,8 +71,20 @@ export function createAuthService(ctx: AppContext) {
       return (await userRepo.updateUser(db, user.id, { fullName }))!;
     },
 
-    /** Grants a role; creates the account if the person hasn't signed in yet. */
-    async setRole(email: string, role: Role): Promise<UserRow> {
+    /** Deletes used or expired sign-in links and expired sessions. */
+    async purgeExpired() {
+      return userRepo.purgeExpiredAuth(db, ctx.clock.now());
+    },
+
+    /**
+     * Grants a role; creates the account if the person hasn't signed in yet.
+     * `actor` is the admin making the change (absent for command-line use);
+     * admins can't demote themselves, so the park can't lose its last admin by accident.
+     */
+    async setRole(email: string, role: Role, actor?: UserRow): Promise<UserRow> {
+      if (actor && actor.email === email && role !== actor.role) {
+        throw conflict('cannot_change_own_role', "You can't change your own role. Ask another admin.");
+      }
       const user = await userRepo.findOrCreateUser(db, email);
       const updated = await userRepo.updateUser(db, user.id, { role });
       if (!updated) throw notFound('User');

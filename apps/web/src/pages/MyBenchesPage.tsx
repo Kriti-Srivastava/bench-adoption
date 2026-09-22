@@ -1,11 +1,13 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { addMonths, SUGGESTED_TERMS_MONTHS, type Adoption } from '@bench/shared';
+import { addMonths, SUGGESTED_TERMS_MONTHS, type Adoption, type Me } from '@bench/shared';
 import { api } from '../api.ts';
 import { SignInForm } from '../components/SignInForm.tsx';
+import { StatusPill } from '../components/TaskEditor.tsx';
 import { ErrorNotice, Loadable, TermPicker } from '../components/ui.tsx';
 import { daysLeftLabel, formatDate, formatPeriod, pluralMonths } from '../format.ts';
+import { TYPE_LABEL } from '../maintenance.ts';
 import { keys, useMe, useMyAdoptions } from '../queries.ts';
 
 export function MyBenchesPage() {
@@ -16,18 +18,27 @@ export function MyBenchesPage() {
 
   return (
     <div className="stack">
-      <h1>My benches</h1>
+      <h1>My account</h1>
       <Loadable query={me}>
         {(user) =>
           user ? (
-            <Loadable query={adoptions}>
-              {(items) => <AdoptionGroups items={items} highlight={renewId} />}
-            </Loadable>
+            <div className="account">
+              <div className="stack">
+                <h2>My benches</h2>
+                <Loadable query={adoptions}>
+                  {(items) => <AdoptionGroups items={items} highlight={renewId} />}
+                </Loadable>
+              </div>
+              <div className="stack">
+                <ProfileCard user={user} />
+                <MyReports />
+              </div>
+            </div>
           ) : (
             <div className="card narrow">
               <SignInForm
                 redirectTo={`/me/benches${renewId ? `?renew=${renewId}` : ''}`}
-                intro="Sign in to see and renew your benches."
+                intro="Sign in to see your benches, renew them, and follow problems you've reported."
               />
             </div>
           )
@@ -55,7 +66,7 @@ function AdoptionGroups({ items, highlight }: { items: Adoption[]; highlight: st
   return (
     <>
       <section className="stack">
-        <h2>Current and upcoming</h2>
+        <h3>Current and upcoming</h3>
         {active.length === 0 && <p className="muted">None right now.</p>}
         {active.map((a) => (
           <AdoptionCard key={a.id} adoption={a} startOpen={a.id === highlight} />
@@ -63,7 +74,7 @@ function AdoptionGroups({ items, highlight }: { items: Adoption[]; highlight: st
       </section>
       {past.length > 0 && (
         <section className="stack">
-          <h2>Past</h2>
+          <h3>Past</h3>
           {past.map((a) => (
             <AdoptionCard key={a.id} adoption={a} startOpen={false} />
           ))}
@@ -149,5 +160,86 @@ function RenewForm({ adoption, onDone }: { adoption: Adoption; onDone: () => voi
         </button>
       </div>
     </div>
+  );
+}
+
+function ProfileCard({ user }: { user: Me }) {
+  const [name, setName] = useState(user.fullName ?? '');
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: () => api.updateMe(name.trim()),
+    onSuccess: (me) => queryClient.setQueryData(keys.me, me),
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate();
+  };
+  return (
+    <section className="card stack">
+      <h2>Profile</h2>
+      <form className="stack" onSubmit={submit}>
+        <div>
+          <label htmlFor="profile-name">Full name</label>
+          <input
+            id="profile-name"
+            type="text"
+            required
+            maxLength={120}
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <p className="muted small" style={{ margin: 0 }}>
+          Signed in as {user.email}
+          {user.role !== 'adopter' && ` · ${user.role}`}
+        </p>
+        <ErrorNotice error={save.error} />
+        {save.isSuccess && <p className="notice success small">Saved.</p>}
+        <div>
+          <button className="btn small" disabled={save.isPending || name.trim() === (user.fullName ?? '')}>
+            Save
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function MyReports() {
+  const reports = useQuery({ queryKey: keys.myReports, queryFn: api.myReports });
+  return (
+    <section className="card stack">
+      <h2>Problems I've reported</h2>
+      <Loadable query={reports}>
+        {(items) =>
+          items.length === 0 ? (
+            <p className="muted small">
+              None yet. Spot a broken or dirty bench? Use "Report a problem" on its page.
+            </p>
+          ) : (
+            <ul className="report-list">
+              {items.map((r) => (
+                <li key={r.id}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <Link to={`/parks/${r.parkSlug}/benches/${r.benchCode}`}>Bench {r.benchCode}</Link>
+                    <StatusPill status={r.status} />
+                  </div>
+                  <span className="muted small">
+                    {TYPE_LABEL[r.type]} · {formatDate(r.createdAt.slice(0, 10))}
+                  </span>
+                  {r.details && <p className="small" style={{ margin: '0.25rem 0 0' }}>{r.details}</p>}
+                  {r.resolution && (
+                    <p className="small nature-note" style={{ margin: '0.4rem 0 0' }}>
+                      <strong>Crew:</strong> {r.resolution}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </Loadable>
+    </section>
   );
 }

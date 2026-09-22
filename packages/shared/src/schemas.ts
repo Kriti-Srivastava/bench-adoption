@@ -149,9 +149,8 @@ const benchFields = {
 export const createBenchInput = z.object(benchFields);
 export type CreateBenchInput = z.input<typeof createBenchInput>;
 
-export const updateBenchInput = z
-  .object({ ...benchFields, status: benchStatus })
-  .partial();
+/** Retiring and restoring go through their own actions, which handle adoptions. */
+export const updateBenchInput = z.object(benchFields).partial();
 export type UpdateBenchInput = z.input<typeof updateBenchInput>;
 
 export const importBenchesInput = z.object({ csv: z.string().min(1) });
@@ -244,3 +243,162 @@ export type AdminAdoption = z.infer<typeof adminAdoption>;
 export const adminAdoptionList = z.object({ items: z.array(adminAdoption) });
 
 export const setRoleInput = z.object({ email, role });
+
+// ---------------------------------------------------------------- maintenance
+
+/** Kinds of upkeep work, modelled on how park conservancies care for benches. */
+export const maintenanceTypes = [
+  'inspection',
+  'repair',
+  'painting',
+  'cleaning',
+  'graffiti',
+  'plaque',
+  'relocation',
+  'other',
+] as const;
+export const maintenanceType = z.enum(maintenanceTypes);
+export type MaintenanceType = z.infer<typeof maintenanceType>;
+
+export const maintenanceStatuses = ['open', 'scheduled', 'in_progress', 'done', 'cancelled'] as const;
+export const maintenanceStatus = z.enum(maintenanceStatuses);
+export type MaintenanceStatus = z.infer<typeof maintenanceStatus>;
+
+export const maintenancePriorities = ['low', 'normal', 'urgent'] as const;
+export const maintenancePriority = z.enum(maintenancePriorities);
+export type MaintenancePriority = z.infer<typeof maintenancePriority>;
+
+/** Benches are due a condition check at least this often (an annual survey). */
+export const INSPECTION_INTERVAL_DAYS = 365;
+
+const personRef = z.object({ id, name: z.string().nullable(), email: z.string() });
+
+export const maintenanceTask = z.object({
+  id,
+  benchId: id,
+  benchCode: z.string(),
+  benchName: z.string(),
+  type: maintenanceType,
+  status: maintenanceStatus,
+  priority: maintenancePriority,
+  title: z.string(),
+  details: z.string().nullable(),
+  reportedBy: personRef.nullable(),
+  assignee: personRef.nullable(),
+  scheduledFor: isoDate.nullable(),
+  completedAt: z.string().nullable(),
+  resolution: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type MaintenanceTask = z.infer<typeof maintenanceTask>;
+export const maintenanceTaskList = z.object({ items: z.array(maintenanceTask) });
+
+export const maintenanceQuery = z.object({
+  status: maintenanceStatus.optional(),
+  type: maintenanceType.optional(),
+  priority: maintenancePriority.optional(),
+  /** Only tasks that still need doing (open, scheduled or in progress). */
+  openOnly: z.stringbool().default(false),
+});
+export type MaintenanceQuery = Partial<z.infer<typeof maintenanceQuery>>;
+
+const taskTitle = z.string().trim().min(1).max(120);
+const taskDetails = z.string().trim().max(2000);
+
+export const createTaskInput = z.object({
+  type: maintenanceType,
+  priority: maintenancePriority.default('normal'),
+  title: taskTitle,
+  details: taskDetails.nullable().default(null),
+  scheduledFor: isoDate.nullable().default(null),
+});
+export type CreateTaskInput = z.input<typeof createTaskInput>;
+
+export const updateTaskInput = z
+  .object({
+    status: maintenanceStatus,
+    priority: maintenancePriority,
+    title: taskTitle,
+    details: taskDetails.nullable(),
+    assigneeId: id.nullable(),
+    scheduledFor: isoDate.nullable(),
+    resolution: taskDetails.nullable(),
+  })
+  .partial();
+export type UpdateTaskInput = z.input<typeof updateTaskInput>;
+
+/** What a visitor can report about a bench. */
+export const problemKinds = ['damaged', 'graffiti', 'dirty', 'plaque', 'other'] as const;
+export const reportProblemInput = z.object({
+  kind: z.enum(problemKinds),
+  details: z.string().trim().min(1).max(1000),
+});
+export type ReportProblemInput = z.input<typeof reportProblemInput>;
+
+/** A visitor's own report, without staff-only details. */
+export const userReport = z.object({
+  id,
+  parkSlug: z.string(),
+  benchCode: z.string(),
+  benchName: z.string(),
+  type: maintenanceType,
+  status: maintenanceStatus,
+  details: z.string().nullable(),
+  resolution: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type UserReport = z.infer<typeof userReport>;
+export const userReportList = z.object({ items: z.array(userReport) });
+
+// ---------------------------------------------------------------- bench lifecycle
+
+/**
+ * What happens to a bench's current adoption when it is retired:
+ * keep it until it ends, end it now, or move it (and its plaque) to
+ * another bench, as park programs do when a bench has to be removed.
+ */
+export const retireBenchInput = z
+  .object({
+    adoption: z.enum(['keep', 'end', 'relocate']),
+    /** Plaque code of the bench to move the adoption to, for "relocate". */
+    relocateTo: z.string().trim().min(1).optional(),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => v.adoption !== 'relocate' || v.relocateTo, {
+    message: 'Choose a bench to move the adoption to',
+    path: ['relocateTo'],
+  });
+export type RetireBenchInput = z.input<typeof retireBenchInput>;
+
+// ---------------------------------------------------------------- admin views
+
+export const adminBench = benchSummary.extend({
+  openTasks: z.number().int(),
+  lastInspectedOn: isoDate.nullable(),
+  lastMaintainedOn: isoDate.nullable(),
+  needsInspection: z.boolean(),
+});
+export type AdminBench = z.infer<typeof adminBench>;
+export const adminBenchList = z.object({ items: z.array(adminBench) });
+
+export const adminSummary = z.object({
+  benches: z.record(availability, z.number().int()),
+  needsInspection: z.number().int(),
+  openTasks: z.number().int(),
+  urgentTasks: z.number().int(),
+  plaquesToInstall: z.number().int(),
+  endingSoon: z.number().int(),
+});
+export type AdminSummary = z.infer<typeof adminSummary>;
+
+export const adminUser = me.extend({
+  createdAt: z.string(),
+  activeAdoptions: z.number().int(),
+});
+export type AdminUser = z.infer<typeof adminUser>;
+export const adminUserList = z.object({ items: z.array(adminUser) });
+export const adminUsersQuery = z.object({
+  q: z.string().trim().min(1).optional(),
+  role: role.optional(),
+});

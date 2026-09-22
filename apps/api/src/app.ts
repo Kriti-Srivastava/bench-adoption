@@ -17,6 +17,7 @@ import { AppError } from './errors.ts';
 import { adoptionRoutes } from './routes/adoptions.ts';
 import { authRoutes } from './routes/auth.ts';
 import { publicRoutes } from './routes/public.ts';
+import { reportRoutes } from './routes/reports.ts';
 import { staffRoutes } from './routes/staff.ts';
 import type { AppContext } from './services/context.ts';
 import { createServices } from './services/index.ts';
@@ -89,6 +90,7 @@ export async function buildApp(
       await v1.register(publicRoutes(services));
       await v1.register(authRoutes(services, deps.config));
       await v1.register(adoptionRoutes(services));
+      await v1.register(reportRoutes(services));
       await v1.register(staffRoutes(services));
     },
     { prefix: '/api/v1' },

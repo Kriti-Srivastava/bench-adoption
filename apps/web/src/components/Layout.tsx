@@ -19,8 +19,8 @@ export function Layout() {
   const user = me.data;
   const isStaff = user?.role === 'staff' || user?.role === 'admin';
   const parkPath = `/parks/${DEFAULT_PARK}`;
-  // "Map" stays highlighted on bench pages too, but not on the staff dashboard.
-  const onMap = location.pathname.startsWith(parkPath) && !location.pathname.endsWith('/staff');
+  // "Map" stays highlighted on bench pages too, but not in the admin area.
+  const onMap = location.pathname.startsWith(parkPath) && !location.pathname.startsWith(`${parkPath}/admin`);
 
   return (
     <>
@@ -40,8 +40,8 @@ export function Layout() {
             <NavLink to={parkPath} className={() => (onMap ? 'active' : '')}>
               Map
             </NavLink>
-            {user && <NavLink to="/me/benches">My benches</NavLink>}
-            {isStaff && <NavLink to={`${parkPath}/staff`}>Staff</NavLink>}
+            {user && <NavLink to="/me">My account</NavLink>}
+            {isStaff && <NavLink to={`${parkPath}/admin`}>Admin</NavLink>}
             {user ? (
               <button className="link-btn" onClick={() => logout.mutate()}>
                 Sign out
@@ -63,7 +63,7 @@ export function Layout() {
           <nav className="row small" aria-label="Footer">
             <Link to="/">Home</Link>
             <Link to={parkPath}>Bench map</Link>
-            <Link to="/me/benches">My benches</Link>
+            <Link to="/me">My account</Link>
           </nav>
         </div>
       </footer>

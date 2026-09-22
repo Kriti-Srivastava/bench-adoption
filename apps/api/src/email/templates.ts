@@ -57,3 +57,39 @@ export const renewalReminderEmail: Template<AdoptionEmailData & { daysLeft: numb
     `If you don't renew, the bench becomes available to other donors after it ends.` +
     signature,
 });
+
+export const adoptionMovedEmail: Template<{
+  fromCode: string;
+  toCode: string;
+  toName: string;
+  endDate: string;
+  reason: string | null;
+  manageUrl: string;
+}> = (to, d) => ({
+  to,
+  subject: `Your adoption has moved to bench ${d.toCode}`,
+  text:
+    `Bench ${d.fromCode} is being removed from the park` +
+    (d.reason ? ` (${d.reason})` : '') +
+    `, so we've moved your adoption and dedication to bench ${d.toCode} (${d.toName}).\n\n` +
+    `Your adoption continues unchanged until ${longDate(d.endDate)}. ` +
+    `Our crew will move your plaque to the new bench.\n\n` +
+    `See your benches here:\n${d.manageUrl}` +
+    signature,
+});
+
+export const adoptionEndedEmail: Template<{
+  benchCode: string;
+  reason: string | null;
+  manageUrl: string;
+}> = (to, d) => ({
+  to,
+  subject: `Bench ${d.benchCode} has been retired`,
+  text:
+    `Bench ${d.benchCode} has been removed from the park` +
+    (d.reason ? ` (${d.reason})` : '') +
+    `, so your adoption of it has ended early.\n\n` +
+    `We're sorry for the change. If you'd like to adopt another bench, ` +
+    `just reply to this email and we'll help you choose one, or browse the map:\n${d.manageUrl}` +
+    signature,
+});

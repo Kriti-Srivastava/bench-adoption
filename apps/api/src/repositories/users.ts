@@ -1,7 +1,7 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, ilike, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Role } from '@bench/shared';
-import type { Executor } from '../db/client.ts';
-import { authTokens, sessions, users } from '../db/schema.ts';
+import { likeContains, type Executor } from '../db/client.ts';
+import { adoptions, authTokens, sessions, users } from '../db/schema.ts';
 
 export type UserRow = typeof users.$inferSelect;
 
@@ -11,6 +11,51 @@ export async function findOrCreateUser(db: Executor, email: string): Promise<Use
   const [row] = await db.select().from(users).where(eq(users.email, email));
   return row!;
 }
+
+export async function findUserById(db: Executor, id: string): Promise<UserRow | undefined> {
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  return row;
+}
+
+/** Users for the admin screen, with how many adoptions each has running. */
+export async function listUsers(
+  db: Executor,
+  f: { q?: string; role?: Role; now: Date },
+): Promise<(UserRow & { activeAdoptions: number })[]> {
+  const pattern = f.q ? likeContains(f.q) : undefined;
+  // "Today" is per park, so compare each adoption against its own park's date.
+  // (users.id is written out in full: Drizzle leaves single-table columns
+  // unqualified, which would be ambiguous inside the subquery.)
+  return db
+    .select({
+      ...usersColumns,
+      activeAdoptions: sql<number>`(
+        select count(*)::int
+        from ${adoptions} a
+        join benches b on b.id = a.bench_id
+        join parks p on p.id = b.park_id
+        where a.adopter_id = "users"."id" and a.status = 'active'
+          and a.end_date > (${f.now.toISOString()}::timestamptz at time zone p.timezone)::date
+      )`,
+    })
+    .from(users)
+    .where(
+      and(
+        pattern ? or(ilike(users.email, pattern), ilike(users.fullName, pattern)) : undefined,
+        f.role ? eq(users.role, f.role) : undefined,
+      ),
+    )
+    .orderBy(asc(users.email))
+    .limit(500);
+}
+
+const usersColumns = {
+  id: users.id,
+  email: users.email,
+  fullName: users.fullName,
+  role: users.role,
+  createdAt: users.createdAt,
+};
 
 export async function updateUser(
   db: Executor,
@@ -73,4 +118,19 @@ export async function findSessionUser(
 
 export async function deleteSession(db: Executor, tokenHash: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+}
+
+// ---------------------------------------------------------------- housekeeping
+
+/** Deletes sign-in links and sessions that can no longer be used. */
+export async function purgeExpiredAuth(db: Executor, now: Date) {
+  const tokens = await db
+    .delete(authTokens)
+    .where(or(lt(authTokens.expiresAt, now), isNotNull(authTokens.usedAt)))
+    .returning({ id: authTokens.id });
+  const expired = await db
+    .delete(sessions)
+    .where(lt(sessions.expiresAt, now))
+    .returning({ id: sessions.id });
+  return { tokens: tokens.length, sessions: expired.length };
 }

@@ -1,13 +1,12 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import type { BenchDetail, Park } from '@bench/shared';
-import { api } from '../api.ts';
 import { BenchMap } from '../components/BenchMap.tsx';
-import { ErrorNotice, Loadable, StatusBadge } from '../components/ui.tsx';
+import { ReportProblem } from '../components/ReportProblem.tsx';
+import { Loadable, StatusBadge } from '../components/ui.tsx';
 import { formatDate } from '../format.ts';
 import { mapUrl } from '../mapFilters.ts';
 import { areaOf, trailsOf } from '../nature.ts';
-import { keys, useBench, useMe, usePark } from '../queries.ts';
+import { useBench, useIsStaff, usePark } from '../queries.ts';
 
 export function BenchPage() {
   const { slug = '', code = '' } = useParams();
@@ -42,6 +41,7 @@ export function BenchPage() {
             </div>
             <div className="bench-layout-side stack">
               <AdoptionPanel slug={slug} bench={b} />
+              <ReportProblem benchId={b.id} />
               <StaffBenchTools slug={slug} bench={b} />
             </div>
             <div className="bench-layout-about">
@@ -137,34 +137,13 @@ function AdoptionPanel({ slug, bench }: { slug: string; bench: BenchDetail }) {
   );
 }
 
-/** Retire or restore a bench; only shown to park staff. */
+/** A shortcut for park staff to this bench's admin page. */
 function StaffBenchTools({ slug, bench }: { slug: string; bench: BenchDetail }) {
-  const me = useMe();
-  const queryClient = useQueryClient();
-  const retired = bench.status === 'retired';
-  const update = useMutation({
-    mutationFn: () => api.staff.updateBench(bench.id, { status: retired ? 'active' : 'retired' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.bench(slug, bench.code) });
-      queryClient.invalidateQueries({ queryKey: keys.benches(slug) });
-    },
-  });
-
-  if (me.data?.role !== 'staff' && me.data?.role !== 'admin') return null;
+  const { isStaff } = useIsStaff();
+  if (!isStaff) return null;
   return (
-    <section className="card stack">
-      <h2>Staff</h2>
-      <p className="muted small">
-        Retired benches show in grey on the map and can't be adopted.
-      </p>
-      <ErrorNotice error={update.error} />
-      <button
-        className={retired ? 'btn secondary' : 'btn danger'}
-        disabled={update.isPending}
-        onClick={() => update.mutate()}
-      >
-        {retired ? 'Return bench to the program' : 'Retire this bench'}
-      </button>
-    </section>
+    <Link className="btn secondary small" to={`/parks/${slug}/admin/benches/${bench.code}`}>
+      Manage this bench (staff)
+    </Link>
   );
 }

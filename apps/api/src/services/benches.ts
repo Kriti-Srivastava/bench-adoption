@@ -132,7 +132,7 @@ export function createBenchService(ctx: AppContext) {
             parkId: park.id,
             areaId: places.areaId(zone),
           });
-          if (trails) await parkRepo.setBenchTrails(tx, [{ benchId: bench.id, trailIds: places.trailIds(trails) }]);
+          if (trails) await parkRepo.setBenchTrails(tx, park.id, [{ benchId: bench.id, trailIds: places.trailIds(trails) }]);
           return bench.id;
         }),
       );
@@ -150,7 +150,7 @@ export function createBenchService(ctx: AppContext) {
             ...values,
             ...(zone === undefined ? {} : { areaId: places.areaId(zone) }),
           });
-          if (trails) await parkRepo.setBenchTrails(tx, [{ benchId: id, trailIds: places.trailIds(trails) }]);
+          if (trails) await parkRepo.setBenchTrails(tx, found.bench.parkId, [{ benchId: id, trailIds: places.trailIds(trails) }]);
         }),
       );
       const today = todayIn(found.timezone, ctx.clock.now());
@@ -206,6 +206,7 @@ export function createBenchService(ctx: AppContext) {
         );
         await parkRepo.setBenchTrails(
           tx,
+          park.id,
           rows
             .filter((r) => r.trails !== undefined)
             .map((r) => ({ benchId: ids.get(r.code)!, trailIds: places.trailIds(r.trails!) })),

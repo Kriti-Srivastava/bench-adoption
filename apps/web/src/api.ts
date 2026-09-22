@@ -4,6 +4,17 @@
  */
 import type {
   AdminAdoption,
+  AdminBench,
+  AdminSummary,
+  AdminUser,
+  CreateTaskInput,
+  MaintenanceQuery,
+  MaintenanceTask,
+  ReportProblemInput,
+  RetireBenchInput,
+  Role,
+  UpdateTaskInput,
+  UserReport,
   Adoption,
   BenchDetail,
   BenchList,
@@ -96,7 +107,29 @@ export const api = {
     request<Adoption>(`/adoptions/${id}/renew`, { method: 'POST', body: { months } }),
   myAdoptions: () => request<{ items: Adoption[] }>('/me/adoptions').then((r) => r.items),
 
+  reportProblem: (benchId: string, input: ReportProblemInput) =>
+    request<UserReport>(`/benches/${benchId}/reports`, { method: 'POST', body: input }),
+  myReports: () => request<{ items: UserReport[] }>('/me/reports').then((r) => r.items),
+
   staff: {
+    summary: (slug: string) => request<AdminSummary>(`/parks/${slug}/admin/summary`),
+    benches: (slug: string) =>
+      request<{ items: AdminBench[] }>(`/parks/${slug}/admin/benches`).then((r) => r.items),
+    retire: (benchId: string, input: RetireBenchInput) =>
+      request<BenchSummary>(`/benches/${benchId}/retire`, { method: 'POST', body: input }),
+    restore: (benchId: string) => request<BenchSummary>(`/benches/${benchId}/restore`, { method: 'POST' }),
+    tasks: (slug: string, q: MaintenanceQuery = {}) =>
+      request<{ items: MaintenanceTask[] }>(`/parks/${slug}/maintenance${query({ ...q })}`).then((r) => r.items),
+    benchTasks: (benchId: string) =>
+      request<{ items: MaintenanceTask[] }>(`/benches/${benchId}/maintenance`).then((r) => r.items),
+    createTask: (benchId: string, input: CreateTaskInput) =>
+      request<MaintenanceTask>(`/benches/${benchId}/maintenance`, { method: 'POST', body: input }),
+    updateTask: (id: string, input: UpdateTaskInput) =>
+      request<MaintenanceTask>(`/maintenance/${id}`, { method: 'PATCH', body: input }),
+    users: (q: { q?: string; role?: Role } = {}) =>
+      request<{ items: AdminUser[] }>(`/admin/users${query(q)}`).then((r) => r.items),
+    setRole: (email: string, role: Role) =>
+      request<Me>('/users/role', { method: 'PUT', body: { email, role } }),
     adoptions: (slug: string, q: { expiringWithinDays?: number; includeEnded?: boolean }) =>
       request<{ items: AdminAdoption[] }>(`/parks/${slug}/adoptions${query(q)}`).then((r) => r.items),
     adoptionsCsvUrl: (slug: string, q: { expiringWithinDays?: number; includeEnded?: boolean }) =>

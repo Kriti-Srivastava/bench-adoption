@@ -10,11 +10,13 @@
  * an active adoption covers today, so it can't drift out of sync.
  */
 import { sql } from 'drizzle-orm';
+import { maintenancePriorities, maintenanceStatuses, maintenanceTypes } from '@bench/shared';
 import {
   boolean,
   check,
   date,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -24,6 +26,7 @@ import {
   real,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   type AnyPgColumn,
@@ -32,6 +35,9 @@ import {
 export const roleEnum = pgEnum('role', ['adopter', 'staff', 'admin']);
 export const benchStatusEnum = pgEnum('bench_status', ['active', 'retired']);
 export const adoptionStatusEnum = pgEnum('adoption_status', ['active', 'cancelled']);
+export const maintenanceTypeEnum = pgEnum('maintenance_type', maintenanceTypes);
+export const maintenanceStatusEnum = pgEnum('maintenance_status', maintenanceStatuses);
+export const maintenancePriorityEnum = pgEnum('maintenance_priority', maintenancePriorities);
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
@@ -61,7 +67,11 @@ export const areas = pgTable(
     facts: facts(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('areas_park_name_unique').on(t.parkId, t.name)],
+  (t) => [
+    uniqueIndex('areas_park_name_unique').on(t.parkId, t.name),
+    // Lets benches reference (area, park) so an area can't belong to another park.
+    unique('areas_id_park_unique').on(t.id, t.parkId),
+  ],
 );
 
 /** A walking trail. Benches along it are linked through `bench_trails`. */
@@ -79,7 +89,15 @@ export const trails = pgTable(
     path: jsonb('path').$type<[number, number][]>().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('trails_park_slug_unique').on(t.parkId, t.slug)],
+  (t) => [
+    uniqueIndex('trails_park_slug_unique').on(t.parkId, t.slug),
+    unique('trails_id_park_unique').on(t.id, t.parkId),
+    check('trails_length_non_negative', sql`${t.lengthMiles} is null or ${t.lengthMiles} >= 0`),
+    check(
+      'trails_path_is_line',
+      sql`jsonb_typeof(${t.path}) = 'array' and jsonb_array_length(${t.path}) >= 2`,
+    ),
+  ],
 );
 
 export const benches = pgTable(
@@ -90,9 +108,7 @@ export const benches = pgTable(
     /** The number on the bench plaque; unique within a park. */
     code: text('code').notNull(),
     name: text('name').notNull(),
-    areaId: uuid('area_id')
-      .notNull()
-      .references(() => areas.id),
+    areaId: uuid('area_id').notNull(),
     description: text('description'),
     lat: doublePrecision('lat').notNull(),
     lng: doublePrecision('lng').notNull(),
@@ -102,6 +118,15 @@ export const benches = pgTable(
   (t) => [
     uniqueIndex('benches_park_code_unique').on(t.parkId, t.code),
     index('benches_area_idx').on(t.areaId),
+    unique('benches_id_park_unique').on(t.id, t.parkId),
+    // The bench's area must be in the same park as the bench.
+    foreignKey({
+      name: 'benches_area_same_park_fk',
+      columns: [t.areaId, t.parkId],
+      foreignColumns: [areas.id, areas.parkId],
+    }),
+    check('benches_lat_range', sql`${t.lat} between -90 and 90`),
+    check('benches_lng_range', sql`${t.lng} between -180 and 180`),
   ],
 );
 
@@ -109,24 +134,39 @@ export const benches = pgTable(
 export const benchTrails = pgTable(
   'bench_trails',
   {
-    benchId: uuid('bench_id')
-      .notNull()
-      .references(() => benches.id, { onDelete: 'cascade' }),
-    trailId: uuid('trail_id')
-      .notNull()
-      .references(() => trails.id, { onDelete: 'cascade' }),
+    benchId: uuid('bench_id').notNull(),
+    trailId: uuid('trail_id').notNull(),
+    /** Carried so both foreign keys can require the bench and trail to share a park. */
+    parkId: uuid('park_id').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.benchId, t.trailId] }), index('bench_trails_trail_idx').on(t.trailId)],
+  (t) => [
+    primaryKey({ columns: [t.benchId, t.trailId] }),
+    index('bench_trails_trail_idx').on(t.trailId),
+    foreignKey({
+      name: 'bench_trails_bench_same_park_fk',
+      columns: [t.benchId, t.parkId],
+      foreignColumns: [benches.id, benches.parkId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'bench_trails_trail_same_park_fk',
+      columns: [t.trailId, t.parkId],
+      foreignColumns: [trails.id, trails.parkId],
+    }).onDelete('cascade'),
+  ],
 );
 
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  /** Stored lower-cased (normalised by the shared `email` schema). */
-  email: text('email').notNull().unique(),
-  fullName: text('full_name'),
-  role: roleEnum('role').notNull().default('adopter'),
-  createdAt: createdAt(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Stored lower-cased, so uniqueness is case-insensitive. */
+    email: text('email').notNull().unique(),
+    fullName: text('full_name'),
+    role: roleEnum('role').notNull().default('adopter'),
+    createdAt: createdAt(),
+  },
+  (t) => [check('users_email_lowercase', sql`${t.email} = lower(${t.email})`)],
+);
 
 export const adoptions = pgTable(
   'adoptions',
@@ -147,7 +187,13 @@ export const adoptions = pgTable(
   },
   (t) => [
     check('adoptions_period_valid', sql`${t.endDate} > ${t.startDate}`),
+    check('adoptions_display_name_length', sql`char_length(${t.displayName}) between 1 and 80`),
+    check('adoptions_dedication_length', sql`char_length(${t.dedication}) <= 280`),
     index('adoptions_adopter_idx').on(t.adopterId),
+    // For "ending soon" lists and the daily reminder job.
+    index('adoptions_active_end_idx')
+      .on(t.endDate)
+      .where(sql`${t.status} = 'active'`),
     uniqueIndex('adoptions_renewed_once')
       .on(t.renewedFromId)
       .where(sql`${t.status} = 'active'`),
@@ -191,4 +237,47 @@ export const remindersSent = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.adoptionId, t.daysBefore] })],
+);
+
+/**
+ * Upkeep work on a bench: inspections, repairs, painting, plaque work and so
+ * on. Raised by staff, by visitors reporting a problem, or automatically
+ * (a plaque to install when a bench is adopted). Done tasks form the bench's
+ * maintenance history, from which "last inspected" is derived.
+ */
+export const maintenanceTasks = pgTable(
+  'maintenance_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    benchId: uuid('bench_id')
+      .notNull()
+      .references(() => benches.id),
+    type: maintenanceTypeEnum('type').notNull(),
+    status: maintenanceStatusEnum('status').notNull().default('open'),
+    priority: maintenancePriorityEnum('priority').notNull().default('normal'),
+    title: text('title').notNull(),
+    details: text('details'),
+    reportedById: uuid('reported_by_id').references(() => users.id),
+    assigneeId: uuid('assignee_id').references(() => users.id),
+    /** The adoption this task serves, e.g. installing its plaque. */
+    adoptionId: uuid('adoption_id').references(() => adoptions.id),
+    scheduledFor: date('scheduled_for', { mode: 'string' }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    resolution: text('resolution'),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('maintenance_bench_idx').on(t.benchId),
+    index('maintenance_open_idx')
+      .on(t.status, t.priority)
+      .where(sql`${t.status} in ('open', 'scheduled', 'in_progress')`),
+    index('maintenance_reporter_idx').on(t.reportedById),
+    check('maintenance_title_length', sql`char_length(${t.title}) between 1 and 120`),
+    // A task is complete exactly when it is marked done.
+    check(
+      'maintenance_completed_when_done',
+      sql`(${t.status} = 'done') = (${t.completedAt} is not null)`,
+    ),
+  ],
 );

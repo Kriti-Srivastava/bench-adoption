@@ -99,9 +99,10 @@ export async function trailIdsBySlug(
   return new Map(rows.map((r) => [r.slug, r.id]));
 }
 
-/** Replaces the trail links of each given bench. */
+/** Replaces the trail links of each given bench (all in one park). */
 export async function setBenchTrails(
   db: Executor,
+  parkId: string,
   links: { benchId: string; trailIds: string[] }[],
 ): Promise<void> {
   if (links.length === 0) return;
@@ -111,7 +112,7 @@ export async function setBenchTrails(
       links.map((l) => l.benchId),
     ),
   );
-  const rows = links.flatMap((l) => l.trailIds.map((trailId) => ({ benchId: l.benchId, trailId })));
+  const rows = links.flatMap((l) => l.trailIds.map((trailId) => ({ benchId: l.benchId, trailId, parkId })));
   if (rows.length > 0) await db.insert(benchTrails).values(rows);
 }
 
