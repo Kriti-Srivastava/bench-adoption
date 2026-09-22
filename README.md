@@ -53,6 +53,11 @@ Key design decisions:
 - **"Adopted" is never stored.** A bench is adopted when an active adoption's
   `[start_date, end_date)` covers today in the park's timezone. Nothing can
   drift out of sync, and expiry needs no cleanup job.
+- **Four states, one definition.** Each bench is `available` (green on the
+  map), `adopted` (red), `ending_soon` (amber: its adoption ends within 60
+  days and hasn't been renewed) or `retired` (grey). The state is computed by a
+  single SQL expression that is used both to report it and to filter by it
+  (`availabilitySql` in `repositories/benches.ts`).
 - **No double-booking, enforced by Postgres.** An exclusion constraint
   (`adoptions_no_overlap`) rejects overlapping adoptions of the same bench.
   If two people click "Adopt" at the same instant, exactly one wins; the

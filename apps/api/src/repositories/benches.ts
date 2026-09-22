@@ -1,7 +1,8 @@
-import { and, asc, eq, gt, ilike, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
-import type { IsoDate } from '@bench/shared';
+import { and, asc, eq, gt, ilike, inArray, lte, or, sql } from 'drizzle-orm';
+import { addDays, ENDING_SOON_DAYS, type BenchAvailability, type IsoDate } from '@bench/shared';
 import type { Executor } from '../db/client.ts';
 import { adoptions, benches, parks } from '../db/schema.ts';
+import { isRenewed } from './adoptions.ts';
 
 export type BenchRow = typeof benches.$inferSelect;
 export type NewBench = typeof benches.$inferInsert;
@@ -10,6 +11,7 @@ export type AdoptionRow = typeof adoptions.$inferSelect;
 export interface BenchWithCurrentAdoption {
   bench: BenchRow;
   current: AdoptionRow | null;
+  availability: BenchAvailability;
 }
 
 /** Joins the (at most one, by constraint) active adoption covering `today`. */
@@ -22,13 +24,34 @@ function currentAdoptionJoin(today: IsoDate) {
   );
 }
 
+/**
+ * The single definition of a bench's availability, used both to report it
+ * and to filter by it, so the two can never disagree.
+ */
+function availabilitySql(today: IsoDate) {
+  const soon = addDays(today, ENDING_SOON_DAYS);
+  return sql<BenchAvailability>`case
+    when ${benches.status} = 'retired' then 'retired'
+    when ${adoptions.id} is null then 'available'
+    when ${adoptions.endDate} <= ${soon}::date and not ${isRenewed} then 'ending_soon'
+    else 'adopted'
+  end`;
+}
+
+function selectBenches(db: Executor, today: IsoDate) {
+  return db
+    .select({ bench: benches, current: adoptions, availability: availabilitySql(today) })
+    .from(benches)
+    .leftJoin(adoptions, currentAdoptionJoin(today));
+}
+
 /** LIKE pattern matching `text` literally anywhere in the value. */
 const contains = (text: string) => `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 
 export interface ListBenchesFilter {
   parkId: string;
   today: IsoDate;
-  availability?: 'available' | 'adopted';
+  availability?: BenchAvailability;
   zone?: string;
   q?: string;
   /** Code of the last bench on the previous page. */
@@ -40,16 +63,11 @@ export async function listBenches(
   db: Executor,
   f: ListBenchesFilter,
 ): Promise<BenchWithCurrentAdoption[]> {
-  const rows = await db
-    .select({ bench: benches, current: adoptions })
-    .from(benches)
-    .leftJoin(adoptions, currentAdoptionJoin(f.today))
+  return selectBenches(db, f.today)
     .where(
       and(
         eq(benches.parkId, f.parkId),
-        eq(benches.status, 'active'),
-        f.availability === 'available' ? isNull(adoptions.id) : undefined,
-        f.availability === 'adopted' ? isNotNull(adoptions.id) : undefined,
+        f.availability ? sql`${availabilitySql(f.today)} = ${f.availability}` : undefined,
         f.zone ? eq(benches.zone, f.zone) : undefined,
         f.q ? or(ilike(benches.code, contains(f.q)), ilike(benches.name, contains(f.q))) : undefined,
         f.afterCode ? gt(benches.code, f.afterCode) : undefined,
@@ -57,7 +75,6 @@ export async function listBenches(
     )
     .orderBy(asc(benches.code))
     .limit(f.limit);
-  return rows;
 }
 
 export async function findBench(
@@ -65,15 +82,11 @@ export async function findBench(
   where: { id: string } | { parkId: string; code: string },
   today: IsoDate,
 ): Promise<BenchWithCurrentAdoption | undefined> {
-  const [row] = await db
-    .select({ bench: benches, current: adoptions })
-    .from(benches)
-    .leftJoin(adoptions, currentAdoptionJoin(today))
-    .where(
-      'id' in where
-        ? eq(benches.id, where.id)
-        : and(eq(benches.parkId, where.parkId), eq(benches.code, where.code)),
-    );
+  const [row] = await selectBenches(db, today).where(
+    'id' in where
+      ? eq(benches.id, where.id)
+      : and(eq(benches.parkId, where.parkId), eq(benches.code, where.code)),
+  );
   return row;
 }
 

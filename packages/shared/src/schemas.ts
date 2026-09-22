@@ -29,7 +29,19 @@ export type Role = z.infer<typeof role>;
 
 export const benchStatus = z.enum(['active', 'retired']);
 export const adoptionStatus = z.enum(['active', 'cancelled']);
-export const availability = z.enum(['available', 'adopted']);
+/**
+ * A bench's state as shown to the public:
+ * - available:   can be adopted today
+ * - adopted:     adopted, and not ending soon (or already renewed)
+ * - ending_soon: adoption ends within ENDING_SOON_DAYS and hasn't been renewed
+ * - retired:     no longer part of the program
+ */
+export const benchAvailabilities = ['available', 'adopted', 'ending_soon', 'retired'] as const;
+export const availability = z.enum(benchAvailabilities);
+export type BenchAvailability = z.infer<typeof availability>;
+
+/** An unrenewed adoption ending within this many days counts as "ending soon". */
+export const ENDING_SOON_DAYS = 60;
 
 // ---------------------------------------------------------------- errors
 
@@ -68,6 +80,7 @@ export const benchSummary = z.object({
   lat: z.number(),
   lng: z.number(),
   status: benchStatus,
+  availability,
   currentAdoption: publicAdoption.nullable(),
 });
 export type BenchSummary = z.infer<typeof benchSummary>;

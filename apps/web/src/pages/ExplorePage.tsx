@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { BenchSummary } from '@bench/shared';
+import type { BenchAvailability, BenchSummary } from '@bench/shared';
+import { ALL_AVAILABILITIES, AVAILABILITY } from '../availability.ts';
 import { BenchMap } from '../components/BenchMap.tsx';
-import { Loadable, StatusBadge } from '../components/ui.tsx';
+import { Loadable, StatusBadge, StatusDot } from '../components/ui.tsx';
 import { formatDate } from '../format.ts';
 import { useBenches, usePark } from '../queries.ts';
-
-type Filter = 'all' | 'available' | 'adopted';
 
 export function ExplorePage() {
   const { slug = '' } = useParams();
@@ -20,8 +19,8 @@ export function ExplorePage() {
           <div>
             <h1>{p.name} benches</h1>
             <p className="muted">
-              Adopt a bench to support the park and add your own dedication. Tap any bench to see
-              who has adopted it, or adopt one that's available.
+              Adopt a bench to support the park and add your own dedication. Zoom into the map
+              and tap any bench to see who has adopted it, or adopt one that's available.
             </p>
           </div>
           <Loadable query={benches}>
@@ -42,48 +41,54 @@ function BenchExplorer({
   zones: string[];
   benches: BenchSummary[];
 }) {
-  const [filter, setFilter] = useState<Filter>('all');
+  const [shown, setShown] = useState<Set<BenchAvailability>>(() => new Set(ALL_AVAILABILITIES));
   const [zone, setZone] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const counts = useMemo(() => {
+    const c = Object.fromEntries(ALL_AVAILABILITIES.map((a) => [a, 0])) as Record<BenchAvailability, number>;
+    for (const b of benches) c[b.availability]++;
+    return c;
+  }, [benches]);
 
   // ~500 benches: filtering in the browser is instant and avoids a round trip.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return benches.filter(
       (b) =>
-        (filter === 'all' || (filter === 'adopted') === (b.currentAdoption !== null)) &&
+        shown.has(b.availability) &&
         (!zone || b.zone === zone) &&
         (!q || b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)),
     );
-  }, [benches, filter, zone, search]);
+  }, [benches, shown, zone, search]);
 
-  const adopted = benches.filter((b) => b.currentAdoption).length;
+  // A search that narrows to one bench zooms straight to it.
+  useEffect(() => {
+    if (search.trim() && visible.length === 1) setSelectedId(visible[0]!.id);
+  }, [search, visible]);
+
+  const toggle = (a: BenchAvailability) =>
+    setShown((prev) => {
+      const next = new Set(prev);
+      if (next.has(a)) next.delete(a);
+      else next.add(a);
+      return next;
+    });
 
   return (
     <>
-      <div className="stats">
-        <div className="card stat">
-          <div className="value">{benches.length}</div>
-          <div className="label">Benches</div>
-        </div>
-        <div className="card stat">
-          <div className="value">{benches.length - adopted}</div>
-          <div className="label">Available</div>
-        </div>
-        <div className="card stat">
-          <div className="value">{adopted}</div>
-          <div className="label">Adopted</div>
-        </div>
-      </div>
-
       <div className="toolbar">
-        <div className="segmented" role="group" aria-label="Show">
-          {(['all', 'available', 'adopted'] as const).map((f) => (
-            <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>
-              {f[0]!.toUpperCase() + f.slice(1)}
+        <div className="chips" role="group" aria-label="Show benches that are">
+          {ALL_AVAILABILITIES.map((a) => (
+            <button key={a} type="button" className="chip" aria-pressed={shown.has(a)} onClick={() => toggle(a)}>
+              <StatusDot availability={a} />
+              {AVAILABILITY[a].label} <span className="muted">{counts[a]}</span>
             </button>
           ))}
         </div>
+      </div>
+      <div className="toolbar">
         <label className="visually-hidden" htmlFor="zone">
           Area
         </label>
@@ -99,50 +104,70 @@ function BenchExplorer({
         <input
           id="search"
           type="search"
-          placeholder="Search by plaque number or name"
+          placeholder="Search by plaque number (e.g. VC-042) or name"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
       <div className="explore">
-        <div className="stack">
-          <BenchMap parkSlug={slug} benches={visible} />
-          <div className="legend">
-            <span>
-              <span className="dot available" />
-              Available
-            </span>
-            <span>
-              <span className="dot adopted" />
-              Adopted
-            </span>
-          </div>
-        </div>
-        <section className="card" aria-label="Bench list">
-          <p className="muted small">
-            Showing {visible.length} of {benches.length}
-          </p>
-          <ul className="bench-list">
-            {visible.map((b) => (
-              <li key={b.id}>
-                <Link to={`/parks/${slug}/benches/${b.code}`}>
-                  <span>
-                    <span className="code">{b.code}</span> <span>{b.name}</span>
-                    {b.currentAdoption && (
-                      <span className="muted small">
-                        <br />
-                        {b.currentAdoption.displayName} · until {formatDate(b.currentAdoption.endDate)}
-                      </span>
-                    )}
-                  </span>
-                  <StatusBadge adopted={b.currentAdoption !== null} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <BenchMap parkSlug={slug} benches={visible} selectedId={selectedId} onSelect={setSelectedId} />
+        <BenchList slug={slug} benches={visible} total={benches.length} selectedId={selectedId} onSelect={setSelectedId} />
       </div>
     </>
+  );
+}
+
+function BenchList({
+  slug,
+  benches,
+  total,
+  selectedId,
+  onSelect,
+}: {
+  slug: string;
+  benches: BenchSummary[];
+  total: number;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const selectedRef = useRef<HTMLLIElement>(null);
+  // Keep the selected bench in view when it was picked on the map.
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedId]);
+
+  return (
+    <section className="card" aria-label="Bench list">
+      <p className="muted small">
+        Showing {benches.length} of {total}. Select a bench to find it on the map.
+      </p>
+      <ul className="bench-list">
+        {benches.map((b) => {
+          const selected = b.id === selectedId;
+          return (
+            <li key={b.id} ref={selected ? selectedRef : undefined} aria-current={selected || undefined}>
+              <button type="button" className="bench-row" onClick={() => onSelect(b.id)}>
+                <span>
+                  <span className="code">{b.code}</span> <span>{b.name}</span>
+                  {b.currentAdoption && (
+                    <span className="muted small">
+                      <br />
+                      {b.currentAdoption.displayName} · until {formatDate(b.currentAdoption.endDate)}
+                    </span>
+                  )}
+                </span>
+                <StatusBadge availability={b.availability} />
+              </button>
+              {selected && (
+                <Link className="small bench-row-link" to={`/parks/${slug}/benches/${b.code}`}>
+                  Full details →
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

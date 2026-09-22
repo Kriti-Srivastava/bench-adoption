@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
+import type { BenchAvailability } from '@bench/shared';
 import { ApiError } from '../api.ts';
+import { AVAILABILITY } from '../availability.ts';
 
-export function StatusBadge({ adopted }: { adopted: boolean }) {
-  return adopted ? (
-    <span className="badge adopted">Adopted</span>
-  ) : (
-    <span className="badge available">Available</span>
-  );
+export function StatusBadge({ availability }: { availability: BenchAvailability }) {
+  return <span className={`badge ${availability}`}>{AVAILABILITY[availability].label}</span>;
+}
+
+/** A colored dot matching the bench's map pin. */
+export function StatusDot({ availability }: { availability: BenchAvailability }) {
+  return <span className="dot" style={{ background: AVAILABILITY[availability].color }} aria-hidden />;
 }
 
 export function ErrorNotice({ error }: { error: unknown }) {

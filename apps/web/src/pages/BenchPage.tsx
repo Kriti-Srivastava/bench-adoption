@@ -1,16 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { todayIn, type BenchDetail } from '@bench/shared';
+import type { BenchDetail } from '@bench/shared';
 import { api } from '../api.ts';
 import { BenchMap } from '../components/BenchMap.tsx';
 import { ErrorNotice, Loadable, StatusBadge } from '../components/ui.tsx';
 import { formatDate } from '../format.ts';
-import { keys, useBench, useMe, usePark } from '../queries.ts';
+import { keys, useBench, useMe } from '../queries.ts';
 
 export function BenchPage() {
   const { slug = '', code = '' } = useParams();
   const bench = useBench(slug, code);
-  const park = usePark(slug);
 
   return (
     <Loadable query={bench}>
@@ -23,11 +22,7 @@ export function BenchPage() {
             <h1 style={{ margin: 0 }}>
               Bench {b.code}
             </h1>
-            {b.status === 'retired' ? (
-              <span className="badge neutral">Retired</span>
-            ) : (
-              <StatusBadge adopted={b.currentAdoption !== null} />
-            )}
+            <StatusBadge availability={b.availability} />
           </div>
           <p className="muted">
             {b.name} · {b.zone}
@@ -36,7 +31,7 @@ export function BenchPage() {
           <div className="two-col">
             <BenchMap parkSlug={slug} benches={[b]} height={320} />
             <div className="stack">
-              <AdoptionPanel slug={slug} bench={b} timezone={park.data?.timezone} />
+              <AdoptionPanel slug={slug} bench={b} />
               <StaffBenchTools slug={slug} bench={b} />
             </div>
           </div>
@@ -46,18 +41,8 @@ export function BenchPage() {
   );
 }
 
-function AdoptionPanel({
-  slug,
-  bench,
-  timezone,
-}: {
-  slug: string;
-  bench: BenchDetail;
-  timezone?: string;
-}) {
+function AdoptionPanel({ slug, bench }: { slug: string; bench: BenchDetail }) {
   const current = bench.currentAdoption;
-  const today = timezone ? todayIn(timezone) : undefined;
-  const freeNow = today !== undefined && bench.availableFrom <= today;
 
   if (bench.status === 'retired') {
     return <p className="notice">This bench is no longer part of the adoption program.</p>;
@@ -77,6 +62,11 @@ function AdoptionPanel({
             <dd>{formatDate(current.endDate)}</dd>
           </dl>
           {current.dedication && <p className="dedication">“{current.dedication}”</p>}
+          {bench.availability === 'ending_soon' && (
+            <p className="notice small">
+              This adoption ends soon and hasn't been renewed yet.
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -88,7 +78,7 @@ function AdoptionPanel({
         </>
       )}
 
-      {freeNow ? (
+      {bench.availability === 'available' ? (
         <Link className="btn" to={`/parks/${slug}/benches/${bench.code}/adopt`}>
           Adopt this bench
         </Link>
@@ -120,7 +110,7 @@ function StaffBenchTools({ slug, bench }: { slug: string; bench: BenchDetail }) 
     <section className="card stack">
       <h2>Staff</h2>
       <p className="muted small">
-        Retired benches are hidden from the public list and can't be adopted.
+        Retired benches show in grey on the map and can't be adopted.
       </p>
       <ErrorNotice error={update.error} />
       <button

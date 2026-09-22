@@ -82,7 +82,8 @@ export function createBenchService(ctx: AppContext) {
       const { park } = await requirePark(slug);
       const values = createBenchInput.parse(input);
       const bench = await saveBench(() => benchRepo.insertBench(db, { ...values, parkId: park.id }));
-      return toBenchSummary({ bench, current: null });
+      // A new bench is active and unadopted by definition.
+      return toBenchSummary({ bench, current: null, availability: 'available' });
     },
 
     async updateBench(id: string, input: UpdateBenchInput): Promise<BenchSummary> {

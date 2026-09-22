@@ -139,7 +139,44 @@ describe('adopting', () => {
     });
     const res = await adopt(staff.cookie, benches[2].id);
     expect(res.json().error.code).toBe('bench_retired');
-    expect((await list()).items).toHaveLength(2);
+    // Retired benches stay on the map, marked as such.
+    expect((await getBench('T-003')).availability).toBe('retired');
+    expect((await list('?availability=retired')).items).toHaveLength(1);
+  });
+
+  it('reports each bench as available, adopted, ending soon or retired', async () => {
+    const { cookie } = await signIn(t, 'donor@example.org');
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    await adopt(cookie, benches[0].id, { months: 12 });
+    await adopt(cookie, benches[1].id, { months: 1 }); // ends in 30 days
+    await t.app.inject({
+      method: 'PATCH',
+      url: `/api/v1/benches/${benches[2].id}`,
+      headers: { cookie: staff.cookie },
+      payload: { status: 'retired' },
+    });
+
+    const byCode = Object.fromEntries(
+      (await list()).items.map((b: { code: string; availability: string }) => [b.code, b.availability]),
+    );
+    expect(byCode).toEqual({ 'T-001': 'adopted', 'T-002': 'ending_soon', 'T-003': 'retired' });
+    for (const a of ['adopted', 'ending_soon', 'retired']) {
+      expect((await list(`?availability=${a}`)).items).toHaveLength(1);
+    }
+    expect((await list('?availability=available')).items).toHaveLength(0);
+  });
+
+  it('stops calling an adoption "ending soon" once it is renewed', async () => {
+    const { cookie } = await signIn(t, 'donor@example.org');
+    const first = (await adopt(cookie, benches[0].id, { months: 1 })).json();
+    expect((await getBench('T-001')).availability).toBe('ending_soon');
+    await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/adoptions/${first.id}/renew`,
+      headers: { cookie },
+      payload: { months: 12 },
+    });
+    expect((await getBench('T-001')).availability).toBe('adopted');
   });
 });
 

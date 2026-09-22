@@ -21,7 +21,7 @@ export function toPublicAdoption(a: AdoptionRow): PublicAdoption {
   };
 }
 
-export function toBenchSummary({ bench, current }: BenchWithCurrentAdoption): BenchSummary {
+export function toBenchSummary({ bench, current, availability }: BenchWithCurrentAdoption): BenchSummary {
   return {
     id: bench.id,
     code: bench.code,
@@ -30,6 +30,7 @@ export function toBenchSummary({ bench, current }: BenchWithCurrentAdoption): Be
     lat: bench.lat,
     lng: bench.lng,
     status: bench.status,
+    availability,
     currentAdoption: current ? toPublicAdoption(current) : null,
   };
 }

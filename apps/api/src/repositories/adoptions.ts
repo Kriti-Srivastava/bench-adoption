@@ -7,7 +7,7 @@ export type AdoptionRow = typeof adoptions.$inferSelect;
 export type NewAdoption = typeof adoptions.$inferInsert;
 
 /** True when an active adoption continues this one. */
-const isRenewed = sql<boolean>`exists (
+export const isRenewed = sql<boolean>`exists (
   select 1 from adoptions r
   where r.renewed_from_id = ${adoptions.id} and r.status = 'active'
 )`;
