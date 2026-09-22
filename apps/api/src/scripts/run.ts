@@ -1,7 +1,7 @@
 import { systemClock } from '../clock.ts';
 import { loadConfig } from '../config.ts';
 import { createDb } from '../db/client.ts';
-import { createSmtpMailer } from '../email/mailer.ts';
+import { createMailer } from '../email/mailer.ts';
 import type { AppContext } from '../services/context.ts';
 import { createServices, type Services } from '../services/index.ts';
 
@@ -16,7 +16,7 @@ export async function runScript(task: (services: Services, ctx: AppContext) => P
     db,
     config,
     clock: systemClock,
-    mailer: createSmtpMailer(config.smtp),
+    mailer: createMailer(config.mail),
     log: { error: (obj, msg) => console.error(msg ?? 'error', obj) },
   };
   try {

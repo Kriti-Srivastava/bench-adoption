@@ -20,6 +20,7 @@ import { AppError } from './errors.ts';
 import { adoptionRoutes } from './routes/adoptions.ts';
 import { authRoutes } from './routes/auth.ts';
 import { registerHealthRoutes } from './routes/health.ts';
+import { jobRoutes } from './routes/jobs.ts';
 import { publicRoutes } from './routes/public.ts';
 import { reportRoutes } from './routes/reports.ts';
 import { staffRoutes } from './routes/staff.ts';
@@ -121,6 +122,12 @@ export async function buildApp(
 
   registerHealthRoutes(app, { db: deps.db, redis });
 
+  // Anything that changed something may have queued an email; send it now
+  // rather than waiting for the next scheduled run.
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.method !== 'GET' && reply.statusCode < 400) services.outbox.kick();
+  });
+
   await app.register(
     async (v1) => {
       await v1.register(publicRoutes(services));
@@ -128,6 +135,7 @@ export async function buildApp(
       await v1.register(adoptionRoutes(services));
       await v1.register(reportRoutes(services));
       await v1.register(staffRoutes(services));
+      await v1.register(jobRoutes(services, deps.config));
     },
     { prefix: '/api/v1' },
   );

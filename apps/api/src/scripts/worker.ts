@@ -6,7 +6,7 @@
 import { systemClock } from '../clock.ts';
 import { loadConfig } from '../config.ts';
 import { createDb } from '../db/client.ts';
-import { createSmtpMailer } from '../email/mailer.ts';
+import { createMailer } from '../email/mailer.ts';
 import { createOutboxService } from '../services/outbox.ts';
 
 const POLL_MS = 2000;
@@ -17,7 +17,7 @@ const outbox = createOutboxService({
   db,
   config,
   clock: systemClock,
-  mailer: createSmtpMailer(config.smtp),
+  mailer: createMailer(config.mail),
   log: { error: (obj, msg) => console.error(msg ?? 'error', obj) },
 });
 

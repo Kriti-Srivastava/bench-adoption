@@ -1,0 +1,27 @@
+# The park's daily job: queue renewal reminders, clear out expired sign-in
+# links and sessions, and send anything waiting in the email queue.
+#
+# Needs two repository secrets: API_URL (e.g. https://bench-api.onrender.com)
+# and JOBS_TOKEN (the same value as the API's JOBS_TOKEN).
+name: Daily park job
+
+on:
+  schedule:
+    # 07:00 in New York (11:00 UTC; an hour later during standard time).
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the daily job
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
+        run: |
+          # --retry: the free API instance may need a moment to wake up.
+          curl --fail-with-body --silent --show-error \
+               --retry 5 --retry-all-errors --retry-delay 10 --max-time 120 \
+               -X POST "$API_URL/api/v1/internal/jobs/daily" \
+               -H "authorization: Bearer $JOBS_TOKEN"

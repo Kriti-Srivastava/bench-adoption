@@ -7,24 +7,36 @@
 | **Database** | PostgreSQL 14+ | Any managed host (Neon, Supabase, RDS…). Run `npm run db:migrate` on each deploy. |
 | **API** | `npm start -w @bench/api` | Stateless: run as many instances as you like. |
 | **Web** | `npm run build` → `apps/web/dist` | Static files. Serve from a CDN on the same domain as the API, routing `/api/*` to the API so the session cookie stays first-party. |
-| **Worker** | `npm run worker -w @bench/api` | Sends queued email with retries. Several may run at once. |
+| **Worker** | `npm run worker -w @bench/api` | Sends queued email with retries. Several may run at once. Optional: with `SEND_MAIL_FROM_API=true` (the default) the API sends queued mail itself, which suits hosts without an always-on worker. |
 | **Daily job** | `npm run jobs:daily -w @bench/api` | Renewal reminders plus clean-up. Schedule once a day. |
 
 ## Configuration
 
 Set `NODE_ENV=production`. The API then defaults to secure cookies and
-**refuses to start** without `DATABASE_URL`, an `https://` `WEB_URL`,
-`SMTP_HOST` and `MAIL_FROM`, listing every problem it finds.
+**refuses to start** without `DATABASE_URL`, an `https://` `WEB_URL` and
+`MAIL_FROM` (plus `RESEND_API_KEY` when `MAIL_PROVIDER=resend`), listing
+every problem it finds.
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `WEB_URL` | Public address of the site; used in email links |
-| `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` | Outgoing email (or swap `createSmtpMailer` for Resend/SES: the `Mailer` interface is one method) |
+| `MAIL_PROVIDER` | `smtp` (a mail server or Mailpit) or `resend` (HTTP API) |
+| `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM` | Outgoing email for `smtp` |
+| `RESEND_API_KEY` | Required when `MAIL_PROVIDER=resend` |
+| `SEND_MAIL_FROM_API` | API sends queued email itself (default true) |
+| `JOBS_TOKEN` | Lets a scheduler POST `/api/v1/internal/jobs/daily` |
 | `COOKIE_SECURE` | Defaults to true in production |
 | `TRUST_PROXY_HOPS` | Number of proxies in front, so per-IP limits see the real visitor |
 | `REDIS_URL` | Optional: shares per-IP rate limits across instances |
 | `DB_POOL_MAX` | Database connections per instance (default 10) |
+
+A scheduler that can't run shell commands (GitHub Actions, cron-job.org, a
+cloud scheduler) can run the daily job over HTTP instead:
+
+```sh
+curl -X POST "$API_URL/api/v1/internal/jobs/daily" -H "authorization: Bearer $JOBS_TOKEN"
+```
 
 ## Health checks
 

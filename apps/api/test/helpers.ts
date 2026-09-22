@@ -31,6 +31,9 @@ export async function createTestApp(overrides: Partial<Config> = {}) {
   const config: Config = {
     ...loadConfig({ WEB_URL: 'http://web.test', AUTH_RATE_LIMIT_PER_MINUTE: '1000' }),
     databaseUrl: TEST_DATABASE_URL,
+    // Tests drive the worker themselves (services.outbox.dispatch), so the
+    // API does not also send in the background and race their assertions.
+    sendMailFromApi: false,
     ...overrides,
   };
   // The chaos suite kills connections on purpose; the resulting "terminated"

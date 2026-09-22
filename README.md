@@ -39,7 +39,9 @@ donors use and the tools the park's crew use to look after the benches.
 
 ## Live demo
 
-Not deployed yet. Run it locally with the steps below.
+Not deployed yet. **[docs/deploy.md](docs/deploy.md)** puts it online in about
+20 minutes on free hosting (Neon + Render + Resend), or run it locally with
+the steps below.
 
 ## Quick start
 
@@ -103,8 +105,9 @@ still hold and the system recovers. See **[docs/testing.md](docs/testing.md)**.
 
 ## Running it for real
 
-Deployment, configuration, health checks, performance figures and scaling
-notes: **[docs/operations.md](docs/operations.md)**.
+- **[docs/deploy.md](docs/deploy.md)** — putting it online, step by step.
+- **[docs/operations.md](docs/operations.md)** — configuration, health
+  checks, performance figures and scaling notes.
 
 ## Status and next steps
 

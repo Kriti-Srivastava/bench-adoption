@@ -120,6 +120,34 @@ describe('configuration', () => {
   });
 });
 
+describe('scheduled job endpoints', () => {
+  it('are only registered with a token, and refuse the wrong one', async () => {
+    // Without JOBS_TOKEN the routes do not exist at all.
+    const closed = await t.app.inject({ method: 'POST', url: '/api/v1/internal/jobs/daily' });
+    expect(closed.statusCode).toBe(404);
+
+    const scheduled = await createTestApp({ jobsToken: 'shared-with-the-scheduler' });
+    try {
+      const url = '/api/v1/internal/jobs/daily';
+      expect((await scheduled.app.inject({ method: 'POST', url })).statusCode).toBe(401);
+      expect(
+        (await scheduled.app.inject({ method: 'POST', url, headers: { authorization: 'Bearer wrong' } }))
+          .statusCode,
+      ).toBe(401);
+
+      const ran = await scheduled.app.inject({
+        method: 'POST',
+        url,
+        headers: { authorization: 'Bearer shared-with-the-scheduler' },
+      });
+      expect(ran.statusCode).toBe(200);
+      expect(ran.json()).toMatchObject({ remindersQueued: 0, delivered: { sent: 0 } });
+    } finally {
+      await scheduled.app.close();
+    }
+  });
+});
+
 describe('without Redis', () => {
   it('keeps sign-in working and reports itself degraded, not down', async () => {
     const degraded = await createTestApp({ redisUrl: 'redis://127.0.0.1:1' });

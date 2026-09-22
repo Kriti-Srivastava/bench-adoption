@@ -1,0 +1,57 @@
+# Render blueprint: the API as a web service, and the site as static files
+# served from Render's CDN. Requests to /api are rewritten to the API, so the
+# site and the API share one origin and session cookies stay first-party.
+#
+# The database lives outside Render (Neon's free tier is permanent, Render's
+# free Postgres expires after 30 days). Set DATABASE_URL in the dashboard.
+#
+# Step-by-step: docs/deploy.md
+services:
+  - type: web
+    name: bench-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    # Free plans have no release step, so migrations run before the server.
+    startCommand: npm run db:migrate -w @bench/api && npm start -w @bench/api
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY_HOPS
+        value: "1" # Render's load balancer
+      - key: MAIL_PROVIDER
+        value: resend
+      - key: SEND_MAIL_FROM_API
+        value: "true" # no separate worker on the free plan
+      # Set these in the Render dashboard (they are secrets or depend on URLs):
+      #   DATABASE_URL   postgres://... from Neon (use the pooled connection string)
+      #   WEB_URL        https://bench-web.onrender.com
+      #   RESEND_API_KEY re_...
+      #   MAIL_FROM      Van Cortlandt Benches <benches@your-domain>
+      #   JOBS_TOKEN     a long random string, also stored as a GitHub secret
+      - key: DATABASE_URL
+        sync: false
+      - key: WEB_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: JOBS_TOKEN
+        sync: false
+
+  - type: web
+    name: bench-web
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: apps/web/dist
+    routes:
+      # Same-origin API: keeps the session cookie first-party.
+      - type: rewrite
+        source: /api/*
+        destination: https://bench-api.onrender.com/api/*
+      # Single-page app: every other path renders the site.
+      - type: rewrite
+        source: /*
+        destination: /index.html

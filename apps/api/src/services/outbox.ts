@@ -14,8 +14,9 @@ const KEEP_SENT_DAYS = 30;
 
 export function createOutboxService(ctx: AppContext) {
   const { db } = ctx;
+  let sending = false;
 
-  return {
+  const service = {
     /** Sends up to `limit` due messages. Returns what happened, for logging. */
     async dispatch(limit = 20): Promise<{ sent: number; retrying: number; failed: number }> {
       const result = { sent: 0, retrying: 0, failed: 0 };
@@ -48,12 +49,32 @@ export function createOutboxService(ctx: AppContext) {
       return result;
     },
 
+    /**
+     * Sends what is waiting, without making the caller wait. Used after a
+     * request that queued something, so email goes out at once even where no
+     * separate worker runs. Failures are left to the retry schedule.
+     */
+    kick(): void {
+      if (!ctx.config.sendMailFromApi || sending) return;
+      sending = true;
+      setTimeout(() => {
+        void service
+          .dispatch()
+          .catch((err) => ctx.log.error({ err }, 'sending queued email failed'))
+          .finally(() => {
+            sending = false;
+          });
+      }, 0);
+    },
+
     /** Queue health, for the daily job's log and the admin dashboard. */
     counts: () => eventRepo.countByStatus(db),
 
     purgeSent: () =>
       eventRepo.purgeSentEmails(db, new Date(ctx.clock.now().getTime() - KEEP_SENT_DAYS * 86_400_000)),
   };
+
+  return service;
 }
 
 export type OutboxService = ReturnType<typeof createOutboxService>;

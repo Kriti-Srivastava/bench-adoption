@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import type { Config } from '../config.ts';
+import { createResendMailer } from './resend.ts';
 
 export interface EmailMessage {
   to: string;
@@ -9,6 +11,13 @@ export interface EmailMessage {
 /** Swap implementations (SMTP, Resend, SES...) without touching services. */
 export interface Mailer {
   send(message: EmailMessage): Promise<void>;
+}
+
+/** The mailer this configuration asks for. */
+export function createMailer(mail: Config['mail']): Mailer {
+  return mail.provider === 'resend'
+    ? createResendMailer({ apiKey: mail.apiKey, from: mail.from })
+    : createSmtpMailer(mail);
 }
 
 export function createSmtpMailer(opts: { host: string; port: number; from: string }): Mailer {
