@@ -7,15 +7,16 @@ import {
   type Adoption,
   type IsoDate,
 } from '@bench/shared';
-import { PG, pgErrorCode, retryOnContention } from '../db/client.ts';
+import type { Executor } from '../db/client.ts';
 import { adoptionConfirmedEmail } from '../email/templates.ts';
 import { toCsv } from '../http/csv.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
-import * as benchRepo from '../repositories/benches.ts';
+import type { BenchRow } from '../repositories/benches.ts';
 import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
 import type { UserRow } from '../repositories/users.ts';
+import { withAdoptionLocked, withBenchesLocked } from './consistency.ts';
 import type { AppContext } from './context.ts';
 import { toAdminAdoption, toAdoption } from './mappers.ts';
 import { notify } from './notify.ts';
@@ -32,39 +33,23 @@ export function createAdoptionService(ctx: AppContext) {
   const { db } = ctx;
   const manageUrl = `${ctx.config.webUrl}/me/benches`;
 
-  /** An adoptable bench and today's date in its park; `months` must be a term the park offers. */
-  async function requireAdoptableBench(benchId: string, months: number) {
-    const found = await benchRepo.findBenchWithParkRules(db, benchId);
-    if (!found) throw notFound('Bench');
-    if (found.bench.status !== 'active') {
+  /**
+   * Checks a (locked) bench can take an adoption of `months`, and returns
+   * today's date in its park. Read inside the lock, so it can't go stale.
+   */
+  async function requireAdoptable(tx: Executor, bench: BenchRow, months: number) {
+    if (bench.status !== 'active') {
       throw conflict('bench_retired', 'This bench is no longer part of the program.');
     }
-    if (!found.adoptionTermsMonths.includes(months)) {
-      throw badRequest('invalid_term', `This park offers adoptions of ${termsLabel(found.adoptionTermsMonths)}.`);
+    const park = (await parkRepo.findParkById(tx, bench.parkId))!;
+    if (!park.adoptionTermsMonths.includes(months)) {
+      throw badRequest('invalid_term', `This park offers adoptions of ${termsLabel(park.adoptionTermsMonths)}.`);
     }
-    return { bench: found.bench, today: todayIn(found.timezone, ctx.clock.now()) };
+    return todayIn(park.timezone, ctx.clock.now());
   }
 
-  /**
-   * Inserts an adoption, letting the database arbitrate conflicts: the
-   * exclusion constraint rejects overlapping periods and the unique index
-   * rejects a second renewal, even when two requests race.
-   */
-  async function insert(values: adoptionRepo.NewAdoption): Promise<Adoption> {
-    try {
-      const row = await retryOnContention(() => adoptionRepo.insertAdoption(db, values));
-      return toAdoption((await adoptionRepo.findAdoptionView(db, row.id))!, ctx.clock.now());
-    } catch (err) {
-      switch (pgErrorCode(err)) {
-        case PG.exclusionViolation:
-          throw conflict('bench_unavailable', 'This bench is already adopted for some of those dates.');
-        case PG.uniqueViolation:
-          throw conflict('already_renewed', 'This adoption has already been renewed.');
-        default:
-          throw err;
-      }
-    }
-  }
+  const view = async (tx: Executor, id: string) =>
+    toAdoption((await adoptionRepo.findAdoptionView(tx, id))!, ctx.clock.now());
 
   async function confirm(user: UserRow, a: Adoption, renewal: boolean) {
     await notify(
@@ -81,25 +66,27 @@ export function createAdoptionService(ctx: AppContext) {
   }
 
   return {
-    /** Adopts a bench starting today. */
+    /** Adopts a bench starting today, and queues its plaque (typically fitted within 6-8 weeks). */
     async adopt(user: UserRow, input: AdoptInput): Promise<Adoption> {
-      const { bench, today } = await requireAdoptableBench(input.benchId, input.months);
-      const adoption = await insert({
-        benchId: bench.id,
-        adopterId: user.id,
-        startDate: today,
-        endDate: addMonths(today, input.months),
-        displayName: input.displayName,
-        dedication: input.dedication,
-        isAnonymous: input.isAnonymous,
-      });
-      // Every new adoption needs its plaque made and fitted (typically 6-8 weeks).
-      await taskRepo.insertTask(db, {
-        benchId: bench.id,
-        type: 'plaque',
-        title: `Install plaque: ${input.isAnonymous ? 'anonymous donor' : input.displayName}`,
-        details: input.dedication,
-        adoptionId: adoption.id,
+      const adoption = await withBenchesLocked(db, [input.benchId], async (tx, [bench]) => {
+        const today = await requireAdoptable(tx, bench!, input.months);
+        const row = await adoptionRepo.insertAdoption(tx, {
+          benchId: bench!.id,
+          adopterId: user.id,
+          startDate: today,
+          endDate: addMonths(today, input.months),
+          displayName: input.displayName,
+          dedication: input.dedication,
+          isAnonymous: input.isAnonymous,
+        });
+        await taskRepo.insertTask(tx, {
+          benchId: bench!.id,
+          type: 'plaque',
+          title: `Install plaque: ${input.isAnonymous ? 'anonymous donor' : input.displayName}`,
+          details: input.dedication,
+          adoptionId: row.id,
+        });
+        return view(tx, row.id);
       });
       await confirm(user, adoption, false);
       return adoption;
@@ -107,31 +94,31 @@ export function createAdoptionService(ctx: AppContext) {
 
     /** Extends the owner's adoption; the new period starts when the current one ends. */
     async renew(user: UserRow, adoptionId: string, months: number): Promise<Adoption> {
-      const current = await adoptionRepo.findAdoptionView(db, adoptionId);
-      // Someone else's adoption is reported as missing, not forbidden, to avoid leaking ids.
-      if (!current || current.adoption.adopterId !== user.id) throw notFound('Adoption');
-
-      const prev = current.adoption;
-      const { today } = await requireAdoptableBench(prev.benchId, months);
-      if (prev.status !== 'active') {
-        throw conflict('adoption_cancelled', 'This adoption was cancelled.');
-      }
-      if (prev.endDate <= today) {
-        throw conflict('adoption_ended', 'This adoption has ended. Please adopt the bench again.');
-      }
-      if (current.isRenewed) {
-        throw conflict('already_renewed', 'This adoption has already been renewed.');
-      }
-
-      const adoption = await insert({
-        benchId: prev.benchId,
-        adopterId: user.id,
-        startDate: prev.endDate,
-        endDate: addMonths(prev.endDate, months),
-        displayName: prev.displayName,
-        dedication: prev.dedication,
-        isAnonymous: prev.isAnonymous,
-        renewedFromId: prev.id,
+      const adoption = await withAdoptionLocked(db, adoptionId, async (tx, current, bench) => {
+        // Someone else's adoption is reported as missing, not forbidden, to avoid leaking ids.
+        if (current.adoption.adopterId !== user.id) throw notFound('Adoption');
+        const prev = current.adoption;
+        const today = await requireAdoptable(tx, bench, months);
+        if (prev.status !== 'active') {
+          throw conflict('adoption_cancelled', 'This adoption was cancelled.');
+        }
+        if (prev.endDate <= today) {
+          throw conflict('adoption_ended', 'This adoption has ended. Please adopt the bench again.');
+        }
+        if (current.isRenewed) {
+          throw conflict('already_renewed', 'This adoption has already been renewed.');
+        }
+        const row = await adoptionRepo.insertAdoption(tx, {
+          benchId: prev.benchId,
+          adopterId: user.id,
+          startDate: prev.endDate,
+          endDate: addMonths(prev.endDate, months),
+          displayName: prev.displayName,
+          dedication: prev.dedication,
+          isAnonymous: prev.isAnonymous,
+          renewedFromId: prev.id,
+        });
+        return view(tx, row.id);
       });
       await confirm(user, adoption, true);
       return adoption;
@@ -176,15 +163,13 @@ export function createAdoptionService(ctx: AppContext) {
       );
     },
 
-    /** Cancels an adoption and any renewals that follow it. */
+    /** Cancels an adoption, any renewals that follow it, and their pending plaque work. */
     async cancel(adoptionId: string): Promise<Adoption> {
-      const cancelled = await db.transaction(async (tx) => {
-        const ids = await adoptionRepo.cancelAdoptionChain(tx, adoptionId);
-        await taskRepo.cancelOpenTasksForAdoptions(tx, ids);
-        return ids;
+      return withAdoptionLocked(db, adoptionId, async (tx) => {
+        const cancelled = await adoptionRepo.cancelAdoptionChain(tx, adoptionId);
+        await taskRepo.cancelOpenTasksForAdoptions(tx, cancelled);
+        return view(tx, adoptionId);
       });
-      if (cancelled.length === 0) throw notFound('Adoption');
-      return toAdoption((await adoptionRepo.findAdoptionView(db, adoptionId))!, ctx.clock.now());
     },
   };
 }

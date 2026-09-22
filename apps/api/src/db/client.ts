@@ -22,20 +22,28 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /** Anything that can run a query: the pool or an open transaction. */
 export type Executor = Db | Tx;
 
-/** Postgres SQLSTATE of a failed query (drizzle wraps the driver error). */
-export function pgErrorCode(err: unknown): string | undefined {
+/** The Postgres error behind a failed query (drizzle wraps the driver's error). */
+export function pgError(err: unknown): { code?: string; constraint?: string } {
   for (let e: unknown = err; e && typeof e === 'object'; e = (e as { cause?: unknown }).cause) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
+    const { code, constraint } = e as { code?: unknown; constraint?: unknown };
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
+      return { code, constraint: typeof constraint === 'string' ? constraint : undefined };
+    }
   }
-  return undefined;
+  return {};
 }
+
+/** Postgres SQLSTATE of a failed query. */
+export const pgErrorCode = (err: unknown) => pgError(err).code;
 
 export const PG = {
   uniqueViolation: '23505',
   exclusionViolation: '23P01',
   serializationFailure: '40001',
   deadlockDetected: '40P01',
+  // Raised by our own triggers (migration 0007_adoption_guards).
+  benchRetired: 'BA001',
+  adoptionNotActive: 'BA002',
 } as const;
 
 /**

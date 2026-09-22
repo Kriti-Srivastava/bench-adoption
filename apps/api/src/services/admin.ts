@@ -16,7 +16,6 @@ import {
   type RetireBenchInput,
   type Role,
 } from '@bench/shared';
-import { PG, pgErrorCode, retryOnContention } from '../db/client.ts';
 import { adoptionEndedEmail, adoptionMovedEmail } from '../email/templates.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import * as adoptionRepo from '../repositories/adoptions.ts';
@@ -25,6 +24,7 @@ import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
+import { withBenchesLocked } from './consistency.ts';
 import type { AppContext } from './context.ts';
 import { toBenchSummary } from './mappers.ts';
 import { notify } from './notify.ts';
@@ -55,14 +55,6 @@ export function createAdminService(ctx: AppContext) {
     return { park, today: todayIn(park.timezone, ctx.clock.now()) };
   }
 
-  async function requireBench(benchId: string) {
-    const found = await benchRepo.findBenchWithParkRules(db, benchId);
-    if (!found) throw notFound('Bench');
-    const today = todayIn(found.timezone, ctx.clock.now());
-    const current = (await benchRepo.findBench(db, { id: benchId }, today))!;
-    return { ...current, today };
-  }
-
   async function summary(benchId: string, today: IsoDate): Promise<BenchSummary> {
     return toBenchSummary((await benchRepo.findBench(db, { id: benchId }, today))!);
   }
@@ -74,6 +66,8 @@ export function createAdminService(ctx: AppContext) {
     actor: UserRow,
     title: string,
     details: string | null,
+    /** The adoption the event concerns, e.g. the one a retirement kept. */
+    adoptionId: string | null = null,
   ) {
     return taskRepo.insertTask(tx, {
       benchId,
@@ -83,6 +77,7 @@ export function createAdminService(ctx: AppContext) {
       title,
       details,
       reportedById: actor.id,
+      adoptionId,
     });
   }
 
@@ -114,58 +109,65 @@ export function createAdminService(ctx: AppContext) {
     /**
      * Takes a bench out of the program. Its current adoption (and any
      * renewal) is kept until it ends, ended now, or moved to another bench
-     * along with a task to move the plaque. The donor is emailed when their
-     * adoption changes.
+     * along with a task to move the plaque. Everything is decided and written
+     * with the bench (and any relocation target) locked, so a donor adopting
+     * or renewing at the same moment can't slip in between. The donor is
+     * emailed when their adoption changes.
      */
     async retire(actor: UserRow, benchId: string, input: RetireBenchInput): Promise<BenchSummary> {
-      const { bench, current, today } = await requireBench(benchId);
-      if (bench.status === 'retired') throw conflict('already_retired', 'This bench is already retired.');
-      const donor = current ? await adoptionRepo.findAdoptionView(db, current.id) : undefined;
       const reason = input.reason?.trim() || null;
-
-      let target: benchRepo.BenchRow | undefined;
-      if (current && input.adoption === 'relocate') {
-        const found = await benchRepo.findBench(db, { parkId: bench.parkId, code: input.relocateTo! }, today);
-        if (!found) throw badRequest('invalid_target', `There is no bench ${input.relocateTo}.`);
-        if (found.bench.id === bench.id) throw badRequest('invalid_target', 'Choose a different bench.');
-        if (found.availability !== 'available') {
-          throw conflict('relocation_target_unavailable', `Bench ${found.bench.code} is not available.`);
-        }
-        target = found.bench;
+      // Resolve the relocation target's id so it can be locked alongside; it is re-checked under the lock.
+      const found = await benchRepo.findBenchWithParkRules(db, benchId);
+      if (!found) throw notFound('Bench');
+      const targetId =
+        input.adoption === 'relocate' ? (await benchRepo.findBenchIdByCode(db, found.bench.parkId, input.relocateTo!)) : undefined;
+      if (input.adoption === 'relocate' && !targetId) {
+        throw badRequest('invalid_target', `There is no bench ${input.relocateTo}.`);
       }
 
-      try {
-        await retryOnContention(() => db.transaction(async (tx) => {
-          await benchRepo.updateBench(tx, benchId, { status: 'retired' });
-          let outcome = 'No active adoption.';
-          if (current && input.adoption === 'end') {
-            const cancelled = await adoptionRepo.cancelAdoptionChain(tx, current.id);
-            await taskRepo.cancelOpenTasksForAdoptions(tx, cancelled);
-            outcome = 'Adoption ended early.';
-          } else if (current && target) {
-            await benchRepo.moveAdoptions(tx, { fromBenchId: benchId, toBenchId: target.id, today });
-            await taskRepo.insertTask(tx, {
-              benchId: target.id,
-              type: 'relocation',
-              title: `Move plaque from ${bench.code}`,
-              details: `Adoption by ${current.displayName} moved from retired bench ${bench.code}.`,
-              adoptionId: current.id,
-              reportedById: actor.id,
-            });
-            outcome = `Adoption moved to ${target.code}.`;
-          } else if (current) {
-            outcome = `Adoption kept until it ends on ${current.endDate}.`;
+      const result = await withBenchesLocked(db, [benchId, ...(targetId ? [targetId] : [])], async (tx) => {
+        const today = todayIn(found.timezone, ctx.clock.now());
+        const { bench, current } = (await benchRepo.findBench(tx, { id: benchId }, today))!;
+        if (bench.status === 'retired') throw conflict('already_retired', 'This bench is already retired.');
+        const donor = current ? await adoptionRepo.findAdoptionView(tx, current.id) : undefined;
+
+        let target: benchRepo.BenchRow | undefined;
+        if (current && targetId) {
+          if (targetId === bench.id) throw badRequest('invalid_target', 'Choose a different bench.');
+          const t = (await benchRepo.findBench(tx, { id: targetId }, today))!;
+          if (t.availability !== 'available') {
+            throw conflict('relocation_target_unavailable', `Bench ${t.bench.code} is not available.`);
           }
-          await logEvent(tx, benchId, actor, 'Bench retired', [reason, outcome].filter(Boolean).join(' '));
-        }));
-      } catch (err) {
-        // Another adoption claimed the target bench between our check and the move.
-        if (pgErrorCode(err) === PG.exclusionViolation) {
-          throw conflict('relocation_target_unavailable', 'That bench was just adopted. Choose another.');
+          target = t.bench;
         }
-        throw err;
-      }
 
+        await benchRepo.updateBench(tx, benchId, { status: 'retired' });
+        let outcome = 'No active adoption.';
+        if (current && input.adoption === 'end') {
+          const cancelled = await adoptionRepo.cancelAdoptionChain(tx, current.id);
+          await taskRepo.cancelOpenTasksForAdoptions(tx, cancelled);
+          outcome = 'Adoption ended early.';
+        } else if (current && target) {
+          await benchRepo.moveAdoptions(tx, { fromBenchId: benchId, toBenchId: target.id, today });
+          await taskRepo.insertTask(tx, {
+            benchId: target.id,
+            type: 'relocation',
+            title: `Move plaque from ${bench.code}`,
+            details: `Adoption by ${current.displayName} moved from retired bench ${bench.code}.`,
+            adoptionId: current.id,
+            reportedById: actor.id,
+          });
+          outcome = `Adoption moved to ${target.code}.`;
+        } else if (current) {
+          outcome = `Adoption kept until it ends on ${current.endDate}.`;
+        }
+        // Record which adoption (if any) the retirement kept running on this bench.
+        const kept = current && input.adoption === 'keep' ? current.id : null;
+        await logEvent(tx, benchId, actor, 'Bench retired', [reason, outcome].filter(Boolean).join(' '), kept);
+        return { bench, donor, target, today };
+      });
+
+      const { bench, donor, target, today } = result;
       if (donor && input.adoption === 'end') {
         await notify(ctx, adoptionEndedEmail(donor.adopterEmail, { benchCode: bench.code, reason, manageUrl }));
       } else if (donor && target) {
@@ -185,13 +187,14 @@ export function createAdminService(ctx: AppContext) {
     },
 
     async restore(actor: UserRow, benchId: string): Promise<BenchSummary> {
-      const { bench, today } = await requireBench(benchId);
-      if (bench.status === 'active') throw conflict('not_retired', 'This bench is already in the program.');
-      await db.transaction(async (tx) => {
+      const found = await benchRepo.findBenchWithParkRules(db, benchId);
+      if (!found) throw notFound('Bench');
+      await withBenchesLocked(db, [benchId], async (tx, [bench]) => {
+        if (bench!.status === 'active') throw conflict('not_retired', 'This bench is already in the program.');
         await benchRepo.updateBench(tx, benchId, { status: 'active' });
         await logEvent(tx, benchId, actor, 'Bench returned to the program', null);
       });
-      return summary(benchId, today);
+      return summary(benchId, todayIn(found.timezone, ctx.clock.now()));
     },
 
     async listUsers(q: { q?: string; role?: Role }): Promise<AdminUser[]> {

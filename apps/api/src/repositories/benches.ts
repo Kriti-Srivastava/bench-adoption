@@ -142,6 +142,19 @@ export async function listUpcomingAdoptions(
     .orderBy(asc(adoptions.startDate));
 }
 
+export async function findBenchIdByCode(db: Executor, parkId: string, code: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ id: benches.id })
+    .from(benches)
+    .where(and(eq(benches.parkId, parkId), eq(benches.code, code)));
+  return row?.id;
+}
+
+/** Locks bench rows for the rest of the transaction (SELECT ... FOR UPDATE), in id order. */
+export async function lockBenches(db: Executor, ids: string[]): Promise<BenchRow[]> {
+  return db.select().from(benches).where(inArray(benches.id, ids)).orderBy(asc(benches.id)).for('update');
+}
+
 export async function insertBench(db: Executor, values: NewBench): Promise<BenchRow> {
   const [row] = await db.insert(benches).values(values).returning();
   return row!;

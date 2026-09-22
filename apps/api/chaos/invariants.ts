@@ -26,13 +26,16 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
     select r.id from adoptions r join adoptions p on p.id = r.renewed_from_id
      where r.status = 'active' and p.status = 'cancelled'`,
 
-  // Application logic: nothing can be adopted once a bench is retired.
-  'no adoption was created on a bench after it was retired': sql`
+  // Nothing can be adopted once a bench is retired: an active adoption on a
+  // retired bench must be one that a retirement explicitly kept ("keep until
+  // it ends"). Checked from recorded facts, not timestamps, which can't be
+  // compared reliably (transaction start times, simulated test clocks).
+  'no adoption on a retired bench except one its retirement kept': sql`
     select a.id from adoptions a join benches b on b.id = a.bench_id
      where b.status = 'retired' and a.status = 'active'
-       and a.created_at > (
-         select max(m.completed_at) from maintenance_tasks m
-          where m.bench_id = b.id and m.title = 'Bench retired')`,
+       and not exists (
+         select 1 from maintenance_tasks m
+          where m.bench_id = b.id and m.title = 'Bench retired' and m.adoption_id = a.id)`,
 
   // Application logic: a cancelled adoption leaves no plaque work behind.
   'no open plaque work for cancelled adoptions': sql`
@@ -44,7 +47,7 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
   'every new adoption has its plaque job': sql`
     select a.id from adoptions a
      where a.renewed_from_id is null
-       and not exists (select 1 from maintenance_tasks m where m.adoption_id = a.id)`,
+       and not exists (select 1 from maintenance_tasks m where m.adoption_id = a.id and m.type = 'plaque')`,
 
   // Enforced by the reminders_sent primary key.
   'no reminder recorded twice': sql`

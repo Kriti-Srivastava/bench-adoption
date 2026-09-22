@@ -12,6 +12,11 @@ export async function findParkBySlug(db: Executor, slug: string): Promise<ParkRo
   return row;
 }
 
+export async function findParkById(db: Executor, id: string): Promise<ParkRow | undefined> {
+  const [row] = await db.select().from(parks).where(eq(parks.id, id));
+  return row;
+}
+
 export async function listParks(db: Executor): Promise<ParkRow[]> {
   return db.select().from(parks).orderBy(asc(parks.name));
 }
