@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, ilike, isNull, lt, or, sql } from 'drizzle-orm';
-import type { Role } from '@bench/shared';
+import { LIST_LIMIT, type Role } from '@bench/shared';
 import { likeContains, type Executor } from '../db/client.ts';
 import { adoptions, authTokens, sessions, users } from '../db/schema.ts';
 
@@ -51,7 +51,22 @@ export async function listUsers(
       ),
     )
     .orderBy(asc(users.email))
-    .limit(500);
+    .limit(LIST_LIMIT);
+}
+
+/** How many accounts the same filter matches, cap or no cap. */
+export async function countUsers(db: Executor, f: { q?: string; role?: Role }): Promise<number> {
+  const pattern = f.q ? likeContains(f.q) : undefined;
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(
+      and(
+        pattern ? or(ilike(users.email, pattern), ilike(users.fullName, pattern)) : undefined,
+        f.role ? eq(users.role, f.role) : undefined,
+      ),
+    );
+  return row?.count ?? 0;
 }
 
 const usersColumns = {

@@ -101,6 +101,19 @@ a new event type can't be added without deciding who is told.
 - **Passwordless sign-in.** Magic links are single-use, expire after 15
   minutes, and are stored hashed, as are session tokens. The account is
   created on first sign-in.
+- **Park staff sign in separately.** The staff entrance (`/staff`, linked in
+  the footer) issues 5-minute links, and only to accounts that already have
+  staff access; anyone else is told so by email, so the API's reply gives
+  nothing away. A link records which entrance asked for it and is refused at
+  the other one, which also catches access granted or revoked in between.
+  Staff accounts cannot adopt or renew, and an address that still holds a
+  bench cannot be made staff, so no account is ever both.
+- **One renewal rule.** `services/renewal.ts` answers "can this be renewed?"
+  once: the command turns the answer into its error, the adoption the API
+  returns carries it as `canRenew`, and the reminder job asks the same
+  questions in SQL. No client re-derives it, so a Renew button is never
+  offered for a retired bench or an adoption that already has a renewal
+  queued.
 - **Sign-in rate limits, in two layers.** *Per address:* at most one link a
   minute and five an hour, counted in Postgres under a per-address advisory
   lock, so the limit holds across any number of API instances. *Per IP:* a
@@ -144,7 +157,9 @@ Errors are always `{ "error": { "code", "message" } }`. The full schema is at
    and a plaque job is queued for the crew (plaques typically take 6–8 weeks).
 4. **Look after it.** The admin area follows how park conservancies work: a
    yearly condition survey, repairs and repainting as needed, and plaques
-   moved to another bench if one has to be removed.
+   moved to another bench if one has to be removed. A moved adoption keeps
+   its end date but starts on the new bench the day it moves, because that
+   bench's own record before then belongs to whoever had it.
 5. **Renew.** The daily job queues reminders 60, 30 and 7 days before an
    adoption ends, each with a one-click renewal link.
 

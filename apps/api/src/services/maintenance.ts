@@ -7,6 +7,13 @@ import type {
   UserReport,
 } from '@bench/shared';
 import { badRequest, notFound } from '../errors.ts';
+
+/** A page of tasks: the rows, and how many match in total (see LIST_LIMIT). */
+interface TaskPage {
+  items: MaintenanceTask[];
+  total: number;
+}
+
 import * as benchRepo from '../repositories/benches.ts';
 import * as taskRepo from '../repositories/maintenance.ts';
 import * as parkRepo from '../repositories/parks.ts';
@@ -80,16 +87,21 @@ export function createMaintenanceService(ctx: AppContext) {
   }
 
   return {
-    async listForPark(slug: string, q: MaintenanceQuery): Promise<MaintenanceTask[]> {
+    async listForPark(slug: string, q: MaintenanceQuery): Promise<TaskPage> {
       const park = await parkRepo.findParkBySlug(db, slug);
       if (!park) throw notFound('Park');
-      const rows = await taskRepo.listTaskViews(db, { parkId: park.id, ...q });
-      return rows.map(toTask);
+      const filter = { parkId: park.id, ...q };
+      const [rows, total] = await Promise.all([
+        taskRepo.listTaskViews(db, filter),
+        taskRepo.countTaskViews(db, filter),
+      ]);
+      return { items: rows.map(toTask), total };
     },
 
-    async listForBench(benchId: string): Promise<MaintenanceTask[]> {
+    async listForBench(benchId: string): Promise<TaskPage> {
       await requireBench(benchId);
-      return (await taskRepo.listTaskViews(db, { benchId })).map(toTask);
+      const rows = await taskRepo.listTaskViews(db, { benchId });
+      return { items: rows.map(toTask), total: rows.length };
     },
 
     /** Staff raise a task directly (inspection rounds, planned painting...). */

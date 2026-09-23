@@ -228,14 +228,21 @@ export async function listAdminBenches(
     .orderBy(asc(benches.code));
 }
 
-/** Moves a bench's current and upcoming adoptions to another bench. Returns their ids. */
+/**
+ * Moves a bench's current and upcoming adoptions to another bench, keeping
+ * the donor's end date. Returns their ids.
+ *
+ * The move starts today: the new bench was someone else's (or nobody's)
+ * before that, so claiming an earlier start would misread its record, and
+ * would overlap any adoption it had in that period.
+ */
 export async function moveAdoptions(
   db: Executor,
   f: { fromBenchId: string; toBenchId: string; today: IsoDate },
 ): Promise<string[]> {
   const rows = await db
     .update(adoptions)
-    .set({ benchId: f.toBenchId })
+    .set({ benchId: f.toBenchId, startDate: sql`greatest(${adoptions.startDate}, ${f.today}::date)` })
     .where(
       and(
         eq(adoptions.benchId, f.fromBenchId),

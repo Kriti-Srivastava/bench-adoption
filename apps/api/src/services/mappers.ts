@@ -9,6 +9,7 @@ import {
 } from '@bench/shared';
 import type { AdoptionView } from '../repositories/adoptions.ts';
 import type { AdoptionRow, BenchWithCurrentAdoption } from '../repositories/benches.ts';
+import { renewalBlockedBy } from './renewal.ts';
 
 export const ANONYMOUS_NAME = 'Anonymous donor';
 
@@ -55,6 +56,7 @@ export function toAdoption(v: AdoptionView, now: Date): Adoption {
     renewedFromId: a.renewedFromId,
     isRenewed: v.isRenewed,
     daysRemaining: Math.max(0, daysBetween(today, a.endDate)),
+    canRenew: renewalBlockedBy(v, today) === null,
   };
 }
 

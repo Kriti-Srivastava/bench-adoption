@@ -112,7 +112,7 @@ export const staffRoutes =
     app.get(
       '/admin/users',
       { schema: { tags, querystring: adminUsersQuery, response: { 200: adminUserList } } },
-      async (req) => ({ items: await services.admin.listUsers(req.query) }),
+      async (req) => services.admin.listUsers(req.query),
     );
 
     // ------------------------------------------------------------ bench lifecycle
@@ -136,13 +136,13 @@ export const staffRoutes =
     app.get(
       '/parks/:slug/maintenance',
       { schema: { tags, params: parkParams, querystring: maintenanceQuery, response: { 200: maintenanceTaskList } } },
-      async (req) => ({ items: await services.maintenance.listForPark(req.params.slug, req.query) }),
+      async (req) => services.maintenance.listForPark(req.params.slug, req.query),
     );
 
     app.get(
       '/benches/:id/maintenance',
       { schema: { tags, params: benchParams, response: { 200: maintenanceTaskList } } },
-      async (req) => ({ items: await services.maintenance.listForBench(req.params.id) }),
+      async (req) => services.maintenance.listForBench(req.params.id),
     );
 
     app.post(

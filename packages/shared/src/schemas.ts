@@ -236,6 +236,8 @@ export const adoption = z.object({
   isRenewed: z.boolean(),
   /** Days until `endDate` in the park's timezone; 0 once it has ended. */
   daysRemaining: z.number().int(),
+  /** Whether renewing would be accepted right now (see the renewal rule). */
+  canRenew: z.boolean(),
 });
 export type Adoption = z.infer<typeof adoption>;
 
@@ -299,6 +301,9 @@ export const maintenanceStatuses = ['open', 'scheduled', 'in_progress', 'done', 
 export const maintenanceStatus = z.enum(maintenanceStatuses);
 export type MaintenanceStatus = z.infer<typeof maintenanceStatus>;
 
+/** Plaque work: fitting a new plaque, or moving one to another bench. */
+export const plaqueTaskTypes = ['plaque', 'relocation'] as const;
+
 export const maintenancePriorities = ['low', 'normal', 'urgent'] as const;
 export const maintenancePriority = z.enum(maintenancePriorities);
 export type MaintenancePriority = z.infer<typeof maintenancePriority>;
@@ -327,11 +332,21 @@ export const maintenanceTask = z.object({
   updatedAt: z.string(),
 });
 export type MaintenanceTask = z.infer<typeof maintenanceTask>;
-export const maintenanceTaskList = z.object({ items: z.array(maintenanceTask) });
+export const maintenanceTaskList = z.object({
+  items: z.array(maintenanceTask),
+  /** How many tasks match; `items` holds at most the first `LIST_LIMIT`. */
+  total: z.number().int(),
+});
+
+/** One type, or several: `type=plaque,relocation`. */
+const maintenanceTypeFilter = z
+  .union([maintenanceType, z.string()])
+  .transform((v) => (typeof v === 'string' ? v.split(',') : [v]))
+  .pipe(z.array(maintenanceType).min(1));
 
 export const maintenanceQuery = z.object({
   status: maintenanceStatus.optional(),
-  type: maintenanceType.optional(),
+  type: maintenanceTypeFilter.optional(),
   priority: maintenancePriority.optional(),
   /** Only tasks that still need doing (open, scheduled or in progress). */
   openOnly: z.stringbool().default(false),
@@ -432,7 +447,17 @@ export const adminUser = me.extend({
   activeAdoptions: z.number().int(),
 });
 export type AdminUser = z.infer<typeof adminUser>;
-export const adminUserList = z.object({ items: z.array(adminUser) });
+export const adminUserList = z.object({
+  items: z.array(adminUser),
+  /** How many accounts match; `items` holds at most the first `LIST_LIMIT`. */
+  total: z.number().int(),
+});
+/**
+ * Admin lists are read in one page; beyond this many rows the list is cut
+ * and `total` says so, which keeps a runaway query from filling a response.
+ */
+export const LIST_LIMIT = 500;
+
 export const adminUsersQuery = z.object({
   q: z.string().trim().min(1).optional(),
   role: role.optional(),

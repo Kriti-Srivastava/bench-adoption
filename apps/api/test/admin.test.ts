@@ -46,6 +46,48 @@ describe('plaques', () => {
   });
 });
 
+describe('the dashboard', () => {
+  it('counts plaque work the same way the maintenance filter lists it', async () => {
+    const { staff, donor } = await (async () => {
+      const donor = await signIn(t, 'donor@example.org');
+      const staff = await signIn(t, 'staff@example.org', 'staff');
+      await adopt(donor.cookie, benches[0].id); // queues a plaque install
+      return { staff, donor };
+    })();
+    // Retiring with a move adds a relocation task: plaque work of a second kind.
+    await call('POST', `/benches/${benches[0].id}/retire`, staff.cookie, {
+      adoption: 'relocate',
+      relocateTo: 'T-003',
+    });
+
+    const summary = (await call('GET', `/parks/${PARK}/admin/summary`, staff.cookie)).json();
+    const listed = (
+      await call('GET', `/parks/${PARK}/maintenance?type=plaque,relocation&openOnly=true`, staff.cookie)
+    ).json();
+    expect(summary.plaquesToInstall).toBe(2);
+    expect(listed.items).toHaveLength(summary.plaquesToInstall);
+    expect(listed.total).toBe(2);
+    expect(donor).toBeTruthy();
+  });
+
+  it('counts every open task, not just the ones a list would show', async () => {
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    for (const type of ['repair', 'cleaning', 'graffiti'] as const) {
+      await call('POST', `/benches/${benches[1].id}/maintenance`, staff.cookie, {
+        type,
+        title: `${type} job`,
+        priority: type === 'repair' ? 'urgent' : 'normal',
+      });
+    }
+    const summary = (await call('GET', `/parks/${PARK}/admin/summary`, staff.cookie)).json();
+    expect(summary).toMatchObject({ openTasks: 3, urgentTasks: 1, plaquesToInstall: 0 });
+
+    // A filtered list reports how many match, so a capped page can say so.
+    const cleaning = (await call('GET', `/parks/${PARK}/maintenance?type=cleaning`, staff.cookie)).json();
+    expect(cleaning.total).toBe(1);
+  });
+});
+
 describe('retiring a bench', () => {
   async function adoptedBench() {
     const donor = await signIn(t, 'donor@example.org');
@@ -103,6 +145,32 @@ describe('retiring a bench', () => {
 
     const mine = (await call('GET', '/me/adoptions', donor.cookie)).json().items;
     expect(mine[0].benchCode).toBe('T-003');
+    // The term is unchanged, but on this bench the adoption begins the day it
+    // moved: T-003 was not this donor's before that.
+    expect(mine[0]).toMatchObject({ startDate: '2026-09-21', endDate: '2027-09-21' });
+  });
+
+  it('moves onto a bench that was adopted earlier, without colliding with its record', async () => {
+    // T-003 was someone else's until 21 October...
+    const past = await signIn(t, 'past@example.org');
+    const earlier = await adopt(past.cookie, benches[2].id, { months: 1 });
+    expect(earlier.endDate).toBe('2026-10-21');
+    // ...while this donor has held T-001 since September.
+    await adoptedBench();
+
+    t.clock.set('2026-11-01'); // T-003 is free again, and sessions have lapsed
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    const donor = await signIn(t, 'donor@example.org');
+    const res = await call('POST', `/benches/${benches[0].id}/retire`, staff.cookie, {
+      adoption: 'relocate',
+      relocateTo: 'T-003',
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Carrying the September start onto T-003 would have claimed a period
+    // that bench was already adopted for, which the database forbids.
+    const mine = (await call('GET', '/me/adoptions', donor.cookie)).json().items;
+    expect(mine[0]).toMatchObject({ benchCode: 'T-003', startDate: '2026-11-01', endDate: '2027-09-21' });
   });
 
   it('refuses to move an adoption onto a bench that is taken', async () => {

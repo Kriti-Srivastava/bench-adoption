@@ -7,6 +7,7 @@ import {
   addDays,
   benchAvailabilities,
   INSPECTION_INTERVAL_DAYS,
+  plaqueTaskTypes,
   todayIn,
   type AdminBench,
   type AdminSummary,
@@ -90,16 +91,18 @@ export function createAdminService(ctx: AppContext) {
       const { park, today } = await requirePark(slug);
       const [rows, open] = await Promise.all([
         benchRepo.listAdminBenches(db, { parkId: park.id, today, timezone: park.timezone }),
-        taskRepo.listTaskViews(db, { parkId: park.id, openOnly: true }),
+        taskRepo.countOpenTasks(db, park.id),
       ]);
       const benches = Object.fromEntries(benchAvailabilities.map((a) => [a, 0])) as AdminSummary['benches'];
       for (const r of rows) benches[r.availability]++;
       return {
         benches,
         needsInspection: rows.filter((r) => needsInspection(r, today)).length,
-        openTasks: open.length,
-        urgentTasks: open.filter((t) => t.task.priority === 'urgent').length,
-        plaquesToInstall: open.filter((t) => t.task.type === 'plaque' || t.task.type === 'relocation').length,
+        openTasks: open.total,
+        urgentTasks: open.urgent,
+        // The same list of types the plaque tile filters by, so the number
+        // shown and the rows it opens are always the same work.
+        plaquesToInstall: plaqueTaskTypes.reduce((n, t) => n + open.byType[t], 0),
         endingSoon: benches.ending_soon,
       };
     },
@@ -223,9 +226,12 @@ export function createAdminService(ctx: AppContext) {
       return summary(benchId, todayIn(found.timezone, ctx.clock.now()));
     },
 
-    async listUsers(q: { q?: string; role?: Role }): Promise<AdminUser[]> {
-      const rows = await userRepo.listUsers(db, { ...q, now: ctx.clock.now() });
-      return rows.map((u) => ({
+    async listUsers(q: { q?: string; role?: Role }): Promise<{ items: AdminUser[]; total: number }> {
+      const [rows, total] = await Promise.all([
+        userRepo.listUsers(db, { ...q, now: ctx.clock.now() }),
+        userRepo.countUsers(db, q),
+      ]);
+      const items = rows.map((u) => ({
         id: u.id,
         email: u.email,
         fullName: u.fullName,
@@ -233,6 +239,7 @@ export function createAdminService(ctx: AppContext) {
         createdAt: u.createdAt.toISOString(),
         activeAdoptions: u.activeAdoptions,
       }));
+      return { items, total };
     },
   };
 }

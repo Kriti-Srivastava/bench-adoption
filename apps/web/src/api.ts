@@ -57,12 +57,22 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
   return data as T;
 }
 
-const query = (params: Record<string, string | number | boolean | undefined>) => {
+const query = (params: Record<string, string | number | boolean | readonly string[] | undefined>) => {
   const q = new URLSearchParams();
+  // An array becomes a comma-separated value, which is how the API reads a
+  // multi-valued filter.
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v));
   const s = q.toString();
   return s ? `?${s}` : '';
 };
+
+/** A capped list: the rows shown, and how many match altogether. */
+export interface Page<T> {
+  items: T[];
+  total: number;
+}
+type TaskPage = Page<MaintenanceTask>;
+type UserPage = Page<AdminUser>;
 
 export const api = {
   park: (slug: string) => request<Park>(`/parks/${slug}`),
@@ -112,15 +122,14 @@ export const api = {
       request<BenchSummary>(`/benches/${benchId}/retire`, { method: 'POST', body: input }),
     restore: (benchId: string) => request<BenchSummary>(`/benches/${benchId}/restore`, { method: 'POST' }),
     tasks: (slug: string, q: MaintenanceQuery = {}) =>
-      request<{ items: MaintenanceTask[] }>(`/parks/${slug}/maintenance${query({ ...q })}`).then((r) => r.items),
+      request<TaskPage>(`/parks/${slug}/maintenance${query({ ...q })}`),
     benchTasks: (benchId: string) =>
-      request<{ items: MaintenanceTask[] }>(`/benches/${benchId}/maintenance`).then((r) => r.items),
+      request<TaskPage>(`/benches/${benchId}/maintenance`).then((r) => r.items),
     createTask: (benchId: string, input: CreateTaskInput) =>
       request<MaintenanceTask>(`/benches/${benchId}/maintenance`, { method: 'POST', body: input }),
     updateTask: (id: string, input: UpdateTaskInput) =>
       request<MaintenanceTask>(`/maintenance/${id}`, { method: 'PATCH', body: input }),
-    users: (q: { q?: string; role?: Role } = {}) =>
-      request<{ items: AdminUser[] }>(`/admin/users${query(q)}`).then((r) => r.items),
+    users: (q: { q?: string; role?: Role } = {}) => request<UserPage>(`/admin/users${query(q)}`),
     setRole: (email: string, role: Role) =>
       request<Me>('/users/role', { method: 'PUT', body: { email, role } }),
     adoptions: (slug: string, q: { expiringWithinDays?: number; includeEnded?: boolean }) =>

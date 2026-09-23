@@ -1,6 +1,12 @@
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
-import type { MaintenancePriority, MaintenanceStatus, MaintenanceType } from '@bench/shared';
+import {
+  LIST_LIMIT,
+  maintenanceTypes,
+  type MaintenancePriority,
+  type MaintenanceStatus,
+  type MaintenanceType,
+} from '@bench/shared';
 import type { Executor } from '../db/client.ts';
 import { benches, maintenanceTasks, parks, users } from '../db/schema.ts';
 
@@ -61,30 +67,77 @@ export interface TaskFilter {
   benchId?: string;
   reportedById?: string;
   status?: MaintenanceStatus;
-  type?: MaintenanceType;
+  /** Any one of these types. */
+  type?: readonly MaintenanceType[];
   priority?: MaintenancePriority;
   openOnly?: boolean;
+}
+
+/** Written once, so the list and its count can never disagree. */
+function taskWhere(f: TaskFilter) {
+  return and(
+    f.parkId ? eq(benches.parkId, f.parkId) : undefined,
+    f.benchId ? eq(maintenanceTasks.benchId, f.benchId) : undefined,
+    f.reportedById ? eq(maintenanceTasks.reportedById, f.reportedById) : undefined,
+    f.status ? eq(maintenanceTasks.status, f.status) : undefined,
+    f.type ? inArray(maintenanceTasks.type, [...f.type]) : undefined,
+    f.priority ? eq(maintenanceTasks.priority, f.priority) : undefined,
+    f.openOnly ? inArray(maintenanceTasks.status, [...OPEN_STATUSES]) : undefined,
+  );
 }
 
 /** Tasks newest first, urgent work ahead of the rest. */
 export async function listTaskViews(db: Executor, f: TaskFilter): Promise<TaskView[]> {
   return selectTaskViews(db)
-    .where(
-      and(
-        f.parkId ? eq(benches.parkId, f.parkId) : undefined,
-        f.benchId ? eq(maintenanceTasks.benchId, f.benchId) : undefined,
-        f.reportedById ? eq(maintenanceTasks.reportedById, f.reportedById) : undefined,
-        f.status ? eq(maintenanceTasks.status, f.status) : undefined,
-        f.type ? eq(maintenanceTasks.type, f.type) : undefined,
-        f.priority ? eq(maintenanceTasks.priority, f.priority) : undefined,
-        f.openOnly ? inArray(maintenanceTasks.status, [...OPEN_STATUSES]) : undefined,
-      ),
-    )
+    .where(taskWhere(f))
     .orderBy(
       sql`case ${maintenanceTasks.priority} when 'urgent' then 0 when 'normal' then 1 else 2 end`,
       desc(maintenanceTasks.createdAt),
     )
-    .limit(1000);
+    .limit(LIST_LIMIT);
+}
+
+/** How many tasks the same filter matches, cap or no cap. */
+export async function countTaskViews(db: Executor, f: TaskFilter): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(maintenanceTasks)
+    .innerJoin(benches, eq(benches.id, maintenanceTasks.benchId))
+    .where(taskWhere(f));
+  return row?.count ?? 0;
+}
+
+export interface OpenTaskCounts {
+  total: number;
+  urgent: number;
+  byType: Record<MaintenanceType, number>;
+}
+
+/**
+ * The dashboard's open-work counts, tallied by the database. Counting rows
+ * the API had already fetched would have stopped at the list cap.
+ */
+export async function countOpenTasks(db: Executor, parkId: string): Promise<OpenTaskCounts> {
+  const rows = await db
+    .select({
+      type: maintenanceTasks.type,
+      count: sql<number>`count(*)::int`,
+      urgent: sql<number>`(count(*) filter (where ${maintenanceTasks.priority} = 'urgent'))::int`,
+    })
+    .from(maintenanceTasks)
+    .innerJoin(benches, eq(benches.id, maintenanceTasks.benchId))
+    .where(and(eq(benches.parkId, parkId), inArray(maintenanceTasks.status, [...OPEN_STATUSES])))
+    .groupBy(maintenanceTasks.type);
+
+  const byType = Object.fromEntries(maintenanceTypes.map((t) => [t, 0])) as Record<MaintenanceType, number>;
+  let total = 0;
+  let urgent = 0;
+  for (const r of rows) {
+    byType[r.type] = r.count;
+    total += r.count;
+    urgent += r.urgent;
+  }
+  return { total, urgent, byType };
 }
 
 /** Closes unfinished tasks tied to adoptions that no longer exist (e.g. plaque installs). */

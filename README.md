@@ -20,8 +20,9 @@ donors use and the tools the park's crew use to look after the benches.
   for a QR code on the plaque.
 - **Adopt in a few steps**: pick a bench, choose a name and dedication, and
   sign in by email. No passwords, no separate sign-up.
-- **My account**: your benches, one-click renewal, and the problems you have
-  reported.
+- **My account**: your benches, one-click renewal while an adoption is still
+  running, and the problems you have reported. Reminders go out 60, 30 and 7
+  days before an adoption ends.
 - **Report a problem** on any bench (damage, graffiti, cleaning, plaque).
 
 **For park staff**
@@ -44,9 +45,15 @@ donors use and the tools the park's crew use to look after the benches.
 
 ## Live demo
 
-Not deployed yet. **[docs/deploy.md](docs/deploy.md)** puts it online in about
-20 minutes on free hosting (Neon + Render + Resend), or run it locally with
-the steps below.
+**https://bench-web.onrender.com** — the real thing, with demo bench data.
+
+Sign in with any email address to adopt a bench: the link arrives by email,
+and no payment is involved. The API is at
+[/api/docs](https://bench-api-mp8e.onrender.com/api/docs). Both run on free
+hosting that sleeps when idle, so the first request can take half a minute.
+
+To put your own copy online (Neon + Render + Resend, about 20 minutes) see
+**[docs/deploy.md](docs/deploy.md)**, or run it locally with the steps below.
 
 ## Quick start
 
@@ -100,7 +107,7 @@ More detail: **[docs/architecture.md](docs/architecture.md)**.
 ## Testing
 
 ```sh
-npm test                          # 111 unit and integration tests
+npm test                          # 124 unit and integration tests
 npm run test:chaos -w @bench/api  # chaos suite (Netflix Chaos Monkey style)
 ```
 

@@ -5,12 +5,13 @@ import {
   maintenancePriorities,
   maintenanceStatuses,
   maintenanceTypes,
+  plaqueTaskTypes,
   roles,
   type AdminBench,
   type MaintenanceQuery,
   type Role,
 } from '@bench/shared';
-import { api } from '../../api.ts';
+import { api, type Page } from '../../api.ts';
 import { NewTaskForm, TaskItem } from '../../components/TaskEditor.tsx';
 import { ErrorNotice, Loadable, StatusBadge } from '../../components/ui.tsx';
 import { formatDate } from '../../format.ts';
@@ -67,10 +68,23 @@ export function AdminPage() {
   );
 }
 
+/**
+ * Long lists are cut off rather than paginated, so say so plainly instead of
+ * letting a search quietly miss what it didn't show.
+ */
+function ShowingSome({ page, noun }: { page: Page<unknown>; noun: string }) {
+  if (page.items.length >= page.total) return null;
+  return (
+    <p className="muted small">
+      Showing the first {page.items.length} of {page.total} {noun}. Narrow the filters to see the rest.
+    </p>
+  );
+}
+
 /** Staff members, for assigning tasks. */
 export function useStaffList() {
   const users = useQuery({ queryKey: keys.users({}), queryFn: () => api.staff.users() });
-  return (users.data ?? []).filter((u) => u.role !== 'adopter');
+  return (users.data?.items ?? []).filter((u) => u.role !== 'adopter');
 }
 
 // ---------------------------------------------------------------- overview
@@ -104,7 +118,7 @@ function OverviewTab({ slug, go }: { slug: string; go: (t: Tab, extra?: Record<s
             <Tile
               label="Plaques to install or move"
               value={s.plaquesToInstall}
-              onClick={() => go('maintenance', { type: 'plaque' })}
+              onClick={() => go('maintenance', { type: plaqueTaskTypes.join(',') })}
             />
             <Tile
               label="Adoptions ending soon"
@@ -123,7 +137,7 @@ function OverviewTab({ slug, go }: { slug: string; go: (t: Tab, extra?: Record<s
           <section className="card stack">
             <h2>Urgent work</h2>
             <Loadable query={urgent}>
-              {(tasks) =>
+              {({ items: tasks }) =>
                 tasks.length === 0 ? (
                   <p className="muted">Nothing urgent. 🎉</p>
                 ) : (
@@ -280,7 +294,7 @@ function MaintenanceTab({ slug }: { slug: string }) {
   const [params, setParams] = useSearchParams();
   const q: MaintenanceQuery = {
     status: (params.get('status') as MaintenanceQuery['status']) ?? undefined,
-    type: (params.get('type') as MaintenanceQuery['type']) ?? undefined,
+    type: (params.get('type')?.split(',') as MaintenanceQuery['type']) ?? undefined,
     priority: (params.get('priority') as MaintenanceQuery['priority']) ?? undefined,
     // With no status chosen, show the work that is still to do.
     openOnly: !params.get('status'),
@@ -317,6 +331,7 @@ function MaintenanceTab({ slug }: { slug: string }) {
             <label htmlFor="f-type" className="small">Type</label>
             <select id="f-type" value={params.get('type') ?? ''} onChange={(e) => set('type', e.target.value)}>
               <option value="">All types</option>
+              <option value={plaqueTaskTypes.join(',')}>Plaque work (install or move)</option>
               {maintenanceTypes.map((t) => (
                 <option key={t} value={t}>
                   {TYPE_LABEL[t]}
@@ -345,15 +360,18 @@ function MaintenanceTab({ slug }: { slug: string }) {
       <section className="card stack">
         <h2>Tasks</h2>
         <Loadable query={tasks}>
-          {(items) =>
-            items.length === 0 ? (
+          {(page) =>
+            page.items.length === 0 ? (
               <p className="muted">No tasks match.</p>
             ) : (
-              <ul className="task-list">
-                {items.map((t) => (
-                  <TaskItem key={t.id} task={t} staff={staff} parkSlug={slug} showBench />
-                ))}
-              </ul>
+              <>
+                <ul className="task-list">
+                  {page.items.map((t) => (
+                    <TaskItem key={t.id} task={t} staff={staff} parkSlug={slug} showBench />
+                  ))}
+                </ul>
+                <ShowingSome page={page} noun="tasks" />
+              </>
             )
           }
         </Loadable>
@@ -428,7 +446,7 @@ function UsersTab() {
       {!isAdmin && <p className="muted small">Only admins can change roles.</p>}
       <ErrorNotice error={change.error} />
       <Loadable query={users}>
-        {(items) => (
+        {(page) => (
           <div className="table-wrap">
             <table>
               <thead>
@@ -440,7 +458,7 @@ function UsersTab() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((u) => (
+                {page.items.map((u) => (
                   <tr key={u.id}>
                     <td>
                       {u.fullName ?? <span className="muted">No name yet</span>}
@@ -470,6 +488,7 @@ function UsersTab() {
                 ))}
               </tbody>
             </table>
+            <ShowingSome page={page} noun="accounts" />
           </div>
         )}
       </Loadable>

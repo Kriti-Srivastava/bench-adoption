@@ -80,6 +80,12 @@ For the full map, about 13 ms of the ~15 ms is the database query and turning
 5. **The data is small.** Hundreds of benches per park and a few thousand
    adoptions fit comfortably in one Postgres. Read replicas only become
    interesting with many parks.
+6. **No unbounded response.** The public bench list is cursor-paginated. The
+   staff lists (tasks, accounts) read one page of `LIST_LIMIT` rows and
+   return `total` alongside, so the admin area can say what it isn't showing
+   rather than quietly dropping rows; dashboard counts are tallied by the
+   database, never by counting a truncated list. Cursor pagination is the
+   next step there if a park's lists outgrow a page.
 
 ## Recommended next steps
 

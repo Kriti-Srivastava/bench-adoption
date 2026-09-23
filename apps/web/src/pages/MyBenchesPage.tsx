@@ -94,7 +94,8 @@ function AdoptionGroups({ items, highlight }: { items: Adoption[]; highlight: st
 }
 
 function AdoptionCard({ adoption: a, startOpen }: { adoption: Adoption; startOpen: boolean }) {
-  const canRenew = a.status === 'active' && a.daysRemaining > 0 && !a.isRenewed;
+  // The API decides this: it knows the whole rule, including retired benches.
+  const canRenew = a.canRenew;
   const [renewing, setRenewing] = useState(startOpen && canRenew);
 
   return (

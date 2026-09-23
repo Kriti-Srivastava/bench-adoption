@@ -53,9 +53,10 @@ export function HomePage() {
               </li>
               <li className="card">
                 <span className="step-num">3</span>
-                <h3>Renew anytime</h3>
+                <h3>Renew before it ends</h3>
                 <p className="muted">
-                  We'll remind you before it ends. Renewing keeps your dedication in place.
+                  We'll email you 60, 30 and 7 days before. Renewing keeps your dedication in
+                  place and your bench off the map for everyone else.
                 </p>
               </li>
             </ol>

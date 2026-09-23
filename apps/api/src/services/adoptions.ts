@@ -17,6 +17,7 @@ import * as parkRepo from '../repositories/parks.ts';
 import type { UserRow } from '../repositories/users.ts';
 import { withAdoptionLocked, withBenchesLocked } from './consistency.ts';
 import { recordEvent } from './events.ts';
+import { BENCH_RETIRED, renewalBlockedBy } from './renewal.ts';
 import type { AppContext } from './context.ts';
 import { toAdminAdoption, toAdoption } from './mappers.ts';
 
@@ -37,7 +38,7 @@ export function createAdoptionService(ctx: AppContext) {
    */
   async function requireAdoptable(tx: Executor, bench: BenchRow, months: number) {
     if (bench.status !== 'active') {
-      throw conflict('bench_retired', 'This bench is no longer part of the program.');
+      throw conflict(BENCH_RETIRED.code, BENCH_RETIRED.message);
     }
     const park = (await parkRepo.findParkById(tx, bench.parkId))!;
     if (!park.adoptionTermsMonths.includes(months)) {
@@ -117,15 +118,8 @@ export function createAdoptionService(ctx: AppContext) {
         if (current.adoption.adopterId !== user.id) throw notFound('Adoption');
         const prev = current.adoption;
         const today = await requireAdoptable(tx, bench, months);
-        if (prev.status !== 'active') {
-          throw conflict('adoption_cancelled', 'This adoption was cancelled.');
-        }
-        if (prev.endDate <= today) {
-          throw conflict('adoption_ended', 'This adoption has ended. Please adopt the bench again.');
-        }
-        if (current.isRenewed) {
-          throw conflict('already_renewed', 'This adoption has already been renewed.');
-        }
+        const blocked = renewalBlockedBy(current, today);
+        if (blocked) throw conflict(blocked.code, blocked.message);
         const row = await adoptionRepo.insertAdoption(tx, {
           benchId: prev.benchId,
           adopterId: user.id,

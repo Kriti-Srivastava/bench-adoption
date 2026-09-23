@@ -17,6 +17,7 @@ const adoptionView = {
   adoption: adoptions,
   benchCode: benches.code,
   benchName: benches.name,
+  benchStatus: benches.status,
   parkId: benches.parkId,
   parkSlug: parks.slug,
   parkTimezone: parks.timezone,
@@ -29,6 +30,7 @@ export type AdoptionView = {
   adoption: AdoptionRow;
   benchCode: string;
   benchName: string;
+  benchStatus: 'active' | 'retired';
   parkId: string;
   parkSlug: string;
   parkTimezone: string;

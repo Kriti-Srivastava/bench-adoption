@@ -180,6 +180,35 @@ describe('adopting', () => {
     expect(res.json().error.code).toBe('validation_error');
   });
 
+  it('tells the owner when renewal is off the table, and refuses it', async () => {
+    const donor = await signIn(t, 'donor@example.org');
+    const staff = await signIn(t, 'staff@example.org', 'staff');
+    const adoption = (await adopt(donor.cookie, benches[0].id)).json();
+
+    const mine = () =>
+      t.app
+        .inject({ method: 'GET', url: '/api/v1/me/adoptions', headers: { cookie: donor.cookie } })
+        .then((r) => r.json().items[0]);
+    expect(await mine()).toMatchObject({ canRenew: true });
+
+    await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/benches/${benches[0].id}/retire`,
+      headers: { cookie: staff.cookie },
+      payload: { adoption: 'keep' },
+    });
+
+    // The card no longer offers Renew, and the command agrees.
+    expect(await mine()).toMatchObject({ canRenew: false });
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/adoptions/${adoption.id}/renew`,
+      headers: { cookie: donor.cookie },
+      payload: { months: 12 },
+    });
+    expect(res.json().error.code).toBe('bench_retired');
+  });
+
   it('refuses retired benches', async () => {
     const staff = await signIn(t, 'staff@example.org', 'staff');
     const donor = await signIn(t, 'donor@example.org');
