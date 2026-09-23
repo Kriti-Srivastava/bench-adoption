@@ -68,6 +68,26 @@ export async function listAdoptionViewsByAdopter(
     .orderBy(asc(adoptions.endDate));
 }
 
+/**
+ * How many benches this person still holds, each judged by today's date in
+ * its own park, so the answer is right across parks in different timezones.
+ */
+export async function countRunningAdoptions(db: Executor, adopterId: string, now: Date): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(adoptions)
+    .innerJoin(benches, eq(benches.id, adoptions.benchId))
+    .innerJoin(parks, eq(parks.id, benches.parkId))
+    .where(
+      and(
+        eq(adoptions.adopterId, adopterId),
+        eq(adoptions.status, 'active'),
+        sql`${adoptions.endDate} > (${now.toISOString()}::timestamptz at time zone ${parks.timezone})::date`,
+      ),
+    );
+  return row?.count ?? 0;
+}
+
 export interface ParkAdoptionsFilter {
   parkId: string;
   today: IsoDate;

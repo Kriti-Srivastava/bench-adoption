@@ -68,6 +68,43 @@ describe('staff accounts cannot adopt', () => {
   });
 });
 
+describe('granting staff access', () => {
+  it('refuses an address that still adopts a bench, so no account is both', async () => {
+    const admin = await signIn(t, 'admin@example.org', 'admin');
+    const donor = await signIn(t, 'donor@example.org');
+    const adoption = (
+      await t.app.inject({
+        method: 'POST',
+        url: '/api/v1/adoptions',
+        headers: { cookie: donor.cookie },
+        payload: { benchId: benches[0].id, months: 12, displayName: 'Donor' },
+      })
+    ).json();
+
+    const promote = () =>
+      t.app.inject({
+        method: 'PUT',
+        url: '/api/v1/users/role',
+        headers: { cookie: admin.cookie },
+        payload: { email: 'donor@example.org', role: 'staff' },
+      });
+
+    const refused = await promote();
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatchObject({ code: 'adopter_has_benches' });
+    expect(refused.json().error.message).toContain('separate work address');
+
+    // Once the address holds no bench, it can take up staff work.
+    await t.app.inject({
+      method: 'POST',
+      url: `/api/v1/adoptions/${adoption.id}/cancel`,
+      headers: { cookie: admin.cookie },
+      payload: {},
+    });
+    expect((await promote()).statusCode).toBe(200);
+  });
+});
+
 describe('the staff entrance', () => {
   it('sends a short-lived link to a staff address', async () => {
     await signIn(t, 'ranger@example.org', 'staff');

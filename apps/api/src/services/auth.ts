@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Me, Role } from '@bench/shared';
 import { AppError, conflict, notFound, tooManyRequests } from '../errors.ts';
+import * as adoptionRepo from '../repositories/adoptions.ts';
 import * as userRepo from '../repositories/users.ts';
 import type { UserRow } from '../repositories/users.ts';
 import type { AppContext } from './context.ts';
@@ -140,6 +141,18 @@ export function createAuthService(ctx: AppContext) {
         throw conflict('cannot_change_own_role', "You can't change your own role. Ask another admin.");
       }
       const user = await userRepo.findOrCreateUser(db, email);
+      // Staff accounts don't hold benches, so an address that still has one
+      // can't become staff; otherwise it would own an adoption it could no
+      // longer renew. Park staff use a work address for their staff account.
+      if (role !== 'adopter' && user.role === 'adopter') {
+        const held = await adoptionRepo.countRunningAdoptions(db, user.id, ctx.clock.now());
+        if (held > 0) {
+          throw conflict(
+            'adopter_has_benches',
+            `${email} currently adopts ${held === 1 ? 'a bench' : `${held} benches`}. Staff accounts can't hold adoptions — give this person staff access on a separate work address.`,
+          );
+        }
+      }
       const updated = await userRepo.updateUser(db, user.id, { role });
       if (!updated) throw notFound('User');
       return updated;
