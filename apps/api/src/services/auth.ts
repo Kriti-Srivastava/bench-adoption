@@ -89,9 +89,19 @@ export function createAuthService(ctx: AppContext) {
         throw new AppError(400, 'invalid_link', 'This sign-in link is invalid or has expired.');
       }
       const user = await userRepo.findOrCreateUser(db, used.email);
-      // Access could have been revoked between issuing the link and using it.
-      if (used.audience === 'staff' && user.role === 'adopter') {
+      // A link only opens the door it was asked for, in both directions: the
+      // two entrances stay separate even if an account's role changed (or was
+      // revoked) between the link being issued and used.
+      const isStaffAccount = user.role !== 'adopter';
+      if (used.audience === 'staff' && !isStaffAccount) {
         throw new AppError(403, 'no_staff_access', 'This account does not have park-staff access.');
+      }
+      if (used.audience === 'donor' && isStaffAccount) {
+        throw new AppError(
+          403,
+          'use_staff_entrance',
+          'This is a park-staff account. Sign in through the "Park staff" link at the bottom of the page.',
+        );
       }
       const sessionToken = newToken();
       const sessionExpiresAt = new Date(now.getTime() + config.sessionTtlDays * DAY);

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../api.ts';
+import { api, ApiError } from '../api.ts';
 import { ErrorNotice } from '../components/ui.tsx';
 import { keys } from '../queries.ts';
 
@@ -26,6 +26,12 @@ export function VerifyPage() {
       .catch(setError);
   }, [params, navigate, queryClient]);
 
+  // A link used at the wrong entrance is sent to the right one.
+  const entrance =
+    error instanceof ApiError && error.code === 'use_staff_entrance'
+      ? { to: '/staff', label: 'Go to the park staff sign-in' }
+      : { to: '/sign-in', label: 'Request a new link' };
+
   return (
     <div className="narrow stack">
       <h1>Signing you in…</h1>
@@ -33,7 +39,7 @@ export function VerifyPage() {
         <>
           <ErrorNotice error={error} />
           <p>
-            <Link to="/sign-in">Request a new link</Link>
+            <Link to={entrance.to}>{entrance.label}</Link>
           </p>
         </>
       )}

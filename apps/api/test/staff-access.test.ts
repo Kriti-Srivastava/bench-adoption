@@ -117,6 +117,21 @@ describe('the staff entrance', () => {
     expect(res.json().error.code).toBe('no_staff_access');
   });
 
+  it('turns a staff account away from the donor entrance', async () => {
+    await signIn(t, 'ranger@example.org', 'staff');
+    t.mailer.sent.length = 0;
+    t.clock.advance(61_000);
+
+    // Nothing is given away when the link is requested: the refusal only
+    // reaches the mailbox's owner, when they use it.
+    await requestLink('ranger@example.org');
+    expect(lastEmail()).toMatchObject({ subject: 'Your sign-in link' });
+
+    const res = await verify(tokenFromLastEmail());
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('use_staff_entrance');
+  });
+
   it('still lets donors sign in the normal way', async () => {
     expect((await requestLink('walker@example.org')).statusCode).toBe(204);
     expect(lastEmail()).toMatchObject({ subject: 'Your sign-in link' });

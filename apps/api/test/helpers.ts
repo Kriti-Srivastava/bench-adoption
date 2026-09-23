@@ -109,7 +109,17 @@ export async function resetData({ db, mailer }: TestApp) {
 
 /** Signs in through the real magic-link flow and returns the session cookie. */
 export async function signIn(t: TestApp, email: string, role?: 'staff' | 'admin') {
-  await t.app.inject({ method: 'POST', url: '/api/v1/auth/magic-link', payload: { email } });
+  // Staff are given their access first and then come in through the staff
+  // entrance, exactly as they do in real life.
+  if (role) {
+    const existing = await userRepo.findOrCreateUser(t.db, email);
+    await userRepo.updateUser(t.db, existing.id, { role });
+  }
+  await t.app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/magic-link',
+    payload: { email, audience: role ? 'staff' : 'donor' },
+  });
   await t.services.outbox.dispatch(100); // stand in for the worker
   const message = t.mailer.sent.findLast((m) => m.to === email);
   const token = new URL(message!.text.match(/https?:\/\/\S+/)![0]).searchParams.get('token');
@@ -118,10 +128,6 @@ export async function signIn(t: TestApp, email: string, role?: 'staff' | 'admin'
     url: '/api/v1/auth/verify',
     payload: { token },
   });
-  if (role) {
-    const user = await userRepo.findOrCreateUser(t.db, email);
-    await userRepo.updateUser(t.db, user.id, { role });
-  }
   const cookie = res.cookies.find((c) => c.name === 'sid')!;
   return { cookie: `sid=${cookie.value}` };
 }
